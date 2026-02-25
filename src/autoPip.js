@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-console.log('[AutoPiP v1.46] script loaded, frame:', window === window.top ? 'TOP' : 'IFRAME');
+console.log('[AutoPiP v1.62] script loaded, frame:', window === window.top ? 'TOP' : 'IFRAME');
 
 function findLargestPlayingVideo() {
   const videos = Array.from(document.querySelectorAll("video"))
@@ -28,7 +28,7 @@ function findLargestPlayingVideo() {
 
 //  Auto-PiP via visibilitychange 
 document.addEventListener("visibilitychange", () => {
-  console.log('[AutoPiP v1.46] visibilitychange hidden:', document.hidden);
+  console.log('[AutoPiP v1.62] visibilitychange hidden:', document.hidden);
   if (document.hidden) {
     triggerAutoPip();
   } else {
@@ -38,14 +38,14 @@ document.addEventListener("visibilitychange", () => {
 
 try {
   navigator.mediaSession.setActionHandler("enterpictureinpicture", () => {
-    console.log('[AutoPiP v1.46] mediaSession enterpictureinpicture');
+    console.log('[AutoPiP v1.62] mediaSession enterpictureinpicture');
     triggerAutoPip();
   });
 } catch (_) {}
 
 function triggerAutoPip() {
   const video = findLargestPlayingVideo();
-  console.log('[AutoPiP v1.46] triggerAutoPip, video:', video ? 'found (' + (video.videoWidth||0) + 'x' + (video.videoHeight||0) + ')' : 'null');
+  console.log('[AutoPiP v1.62] triggerAutoPip, video:', video ? 'found (' + (video.videoWidth||0) + 'x' + (video.videoHeight||0) + ')' : 'null');
   if (!video) return;
 
   // Already open — don't open another
@@ -53,27 +53,32 @@ function triggerAutoPip() {
 
   if (typeof window.documentPictureInPicture === 'undefined') return; // no fallback popup
 
-  chrome.storage.local.get({ autopipW: 0, autopipH: 0 }, (stored) => {
+  chrome.runtime.sendMessage({ type: 'getPipSize' }, (stored) => {
     // Re-check after async get (user may have returned to tab)
     if (!document.hidden) return;
     if (window._autoPipWindow && !window._autoPipWindow.closed) return;
 
-    const w = stored.autopipW > 0 ? stored.autopipW : Math.max(320, video.videoWidth  || 640);
-    const h = stored.autopipH > 0 ? stored.autopipH : Math.max(180, video.videoHeight || 360);
+    const w = (stored && stored.w > 0) ? stored.w : Math.max(320, video.videoWidth  || 640);
+    const h = (stored && stored.h > 0) ? stored.h : Math.max(180, video.videoHeight || 360);
+    const x = (stored && stored.x != null) ? stored.x : undefined;
+    const y = (stored && stored.y != null) ? stored.y : undefined;
     window.documentPictureInPicture.requestWindow({ width: w, height: h })
       .then((pipWin) => {
-        console.log('[AutoPiP v1.46] Document PiP window opened');
+        console.log('[AutoPiP v1.62] Document PiP window opened');
+        // Restore position if we have one
+        if (x != null && y != null) {
+          try { pipWin.moveTo(x, y); } catch(_) {}
+        }
         window._autoPipWindow = pipWin;
         setupAutoPipWindow(pipWin, video, w, h);
       })
       .catch((err) => {
-        console.log('[AutoPiP v1.46] Document PiP failed (no fallback):', err.message);
-        // No window.open fallback — avoid unwanted popups
+        console.log('[AutoPiP v1.62] Document PiP failed (no fallback):', err.message);
       });
   });
 }
 
-function setupAutoPipWindow(pipWin, video, openedW, openedH) {
+function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
   const style = pipWin.document.createElement("style");
   style.textContent = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -269,21 +274,68 @@ function setupAutoPipWindow(pipWin, video, openedW, openedH) {
   });
   ro.observe(pipWin.document.body);
 
-  // ── Size persistence ──────────────────────────────────────────────────────
-  let userInteracted = false;
-  pipWin.addEventListener("mousedown", () => { userInteracted = true; });
+  // ── Debug badge (top-right, shows live size + position) ───────────────────
+  const dbg = pipWin.document.createElement("div");
+  Object.assign(dbg.style, {
+    position:"fixed", top:"4px", right:"4px", zIndex:"9999",
+    background:"rgba(0,0,0,.8)", color:"#0f0", fontFamily:"monospace",
+    fontSize:"10px", padding:"2px 5px", borderRadius:"3px", pointerEvents:"none",
+    lineHeight:"1.5", whiteSpace:"nowrap"
+  });
+  pipWin.document.body.appendChild(dbg);
+  const updateDbg = () => {
+    dbg.textContent = pipWin.innerWidth + "×" + pipWin.innerHeight + " @(" + pipWin.screenX + "," + pipWin.screenY + ")";
+  };
+  pipWin.addEventListener("resize", updateDbg);
+  pipWin.addEventListener("move",   updateDbg);
+  updateDbg();
+
+  // ── Size + position persistence ───────────────────────────────────────────
+  // We track the *requested* size as canonical. Chrome may deliver slightly different
+  // innerWidth/Height due to DPR rounding — saving that would cause drift each session.
+  // We only update canonical size when the user *manually* resizes (size change > 4px).
+  const snapToGrid = (v) => {
+    const dpr = pipWin.devicePixelRatio || 1;
+    return Math.round(Math.round(v * dpr) / dpr);
+  };
+  let canonW = requestedW || snapToGrid(pipWin.innerWidth  || 0);
+  let canonH = requestedH || snapToGrid(pipWin.innerHeight || 0);
+  // Save canonical size + current position
+  const saveGeometry = () => {
+    const x = pipWin.screenX;
+    const y = pipWin.screenY;
+    if (canonW > 0 && canonH > 0) chrome.runtime.sendMessage({ type: 'setPipSize', w: canonW, h: canonH, x, y });
+  };
+  // After 800ms, if Chrome drifted the window size due to DPR rounding, snap it back.
+  setTimeout(() => {
+    if (pipWin.closed) return;
+    const curW = pipWin.innerWidth  || 0;
+    const curH = pipWin.innerHeight || 0;
+    if (canonW > 0 && canonH > 0 && (curW !== canonW || curH !== canonH)) {
+      try { pipWin.resizeTo(canonW, canonH); } catch(_) {}
+    }
+  }, 800);
+  // Suppress resize events for 1500ms (initial layout storm), then only update canonical
+  // if the user resizes more than 4px (not Chrome's DPR micro-adjustment).
+  const openedAt = Date.now();
   let saveTimer = null;
   pipWin.addEventListener("resize", () => {
-    if (!userInteracted) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const w = pipWin.outerWidth  || pipWin.innerWidth  || 0;
-      const h = pipWin.outerHeight || pipWin.innerHeight || 0;
-      if (w > 0 && h > 0) chrome.storage.local.set({ autopipW: w, autopipH: h });
-    }, 300);
+      if (Date.now() - openedAt < 1500) return;
+      const newW = snapToGrid(pipWin.innerWidth  || 0);
+      const newH = snapToGrid(pipWin.innerHeight || 0);
+      if (Math.abs(newW - canonW) > 4 || Math.abs(newH - canonH) > 4) {
+        canonW = newW;
+        canonH = newH;
+      }
+      saveGeometry();
+    }, 400);
   });
 
   pipWin.addEventListener("pagehide", () => {
+    clearTimeout(saveTimer);
+    saveGeometry();
     ro.disconnect();
     if (stream) stream.getTracks().forEach((t) => t.stop());
     else { document.body.appendChild(video); video.removeAttribute("__autopip__"); }
@@ -292,7 +344,7 @@ function setupAutoPipWindow(pipWin, video, openedW, openedH) {
 }
 
 function stopAutoPip() {
-  console.log('[AutoPiP v1.46] stopAutoPip, _autoPipWindow:', window._autoPipWindow ? 'exists' : 'null');
+  console.log('[AutoPiP v1.62] stopAutoPip, _autoPipWindow:', window._autoPipWindow ? 'exists' : 'null');
   if (window._autoPipWindow && !window._autoPipWindow.closed) {
     window._autoPipWindow.close();
   }

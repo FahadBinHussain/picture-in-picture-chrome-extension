@@ -229,7 +229,7 @@ function openOverlayWithStream(video) {
 
 // ─── Document PiP setup (Chrome 116+, if available) ──────────────────────────
 
-function setupDocPipWindow(pipWindow, video, openedW, openedH) {
+function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
   window._docPipWindow = pipWindow;
 
   const style = pipWindow.document.createElement('style');
@@ -394,21 +394,51 @@ function setupDocPipWindow(pipWindow, video, openedW, openedH) {
   });
   ro.observe(pipWindow.document.body);
 
-  // ── Size persistence ──────────────────────────────────────────────────────
-  let userInteracted = false;
-  pipWindow.addEventListener('mousedown', () => { userInteracted = true; });
+  // ── Size + position persistence ───────────────────────────────────────────
+  // We track the *requested* size as canonical. Chrome may deliver slightly different
+  // innerWidth/Height due to DPR rounding — saving that would cause drift each session.
+  // We only update canonical size when the user *manually* resizes (size change > 4px).
+  const snapToGrid = (v) => {
+    const dpr = pipWindow.devicePixelRatio || 1;
+    return Math.round(Math.round(v * dpr) / dpr);
+  };
+  let canonW = requestedW || snapToGrid(pipWindow.innerWidth  || 0);
+  let canonH = requestedH || snapToGrid(pipWindow.innerHeight || 0);
+  const saveGeometry = () => {
+    const x = pipWindow.screenX;
+    const y = pipWindow.screenY;
+    if (canonW > 0 && canonH > 0) chrome.runtime.sendMessage({ type: 'setPipSize', w: canonW, h: canonH, x, y });
+  };
+  // After 800ms, if Chrome drifted the window size due to DPR rounding, snap it back.
+  setTimeout(() => {
+    if (pipWindow.closed) return;
+    const curW = pipWindow.innerWidth  || 0;
+    const curH = pipWindow.innerHeight || 0;
+    if (canonW > 0 && canonH > 0 && (curW !== canonW || curH !== canonH)) {
+      try { pipWindow.resizeTo(canonW, canonH); } catch(_) {}
+    }
+  }, 800);
+  // Suppress resize events for 1500ms (initial layout storm), then only update canonical
+  // if the user resizes more than 4px (not Chrome's DPR micro-adjustment).
+  const openedAt = Date.now();
   let saveTimer = null;
   pipWindow.addEventListener('resize', () => {
-    if (!userInteracted) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const w = pipWindow.outerWidth  || pipWindow.innerWidth  || 0;
-      const h = pipWindow.outerHeight || pipWindow.innerHeight || 0;
-      if (w > 0 && h > 0) chrome.storage.local.set({ pipW: w, pipH: h });
-    }, 300);
+      if (Date.now() - openedAt < 1500) return;
+      const newW = snapToGrid(pipWindow.innerWidth  || 0);
+      const newH = snapToGrid(pipWindow.innerHeight || 0);
+      if (Math.abs(newW - canonW) > 4 || Math.abs(newH - canonH) > 4) {
+        canonW = newW;
+        canonH = newH;
+      }
+      saveGeometry();
+    }, 400);
   });
 
   pipWindow.addEventListener('pagehide', () => {
+    clearTimeout(saveTimer);
+    saveGeometry();
     ro.disconnect();
     if (stream) {
       stream.getTracks().forEach(t => t.stop());
@@ -426,7 +456,7 @@ function setupDocPipWindow(pipWindow, video, openedW, openedH) {
   // ── Version toast (runs unconditionally in the top-level frame) ───────────
   if (window === window.top) {
     const toast = document.createElement('div');
-    toast.textContent = '✅ PiP v1.46';
+    toast.textContent = '✅ PiP v1.62';
     Object.assign(toast.style, {
       position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
       zIndex: '2147483647',
@@ -441,7 +471,7 @@ function setupDocPipWindow(pipWindow, video, openedW, openedH) {
     setTimeout(() => { toast.remove(); }, 4100);
   }
 
-  console.log('[PiP v1.46] frame:', window === window.top ? 'TOP' : 'IFRAME', '| documentPictureInPicture:', typeof window.documentPictureInPicture !== 'undefined');
+  console.log('[PiP v1.62] frame:', window === window.top ? 'TOP' : 'IFRAME', '| documentPictureInPicture:', typeof window.documentPictureInPicture !== 'undefined');
 
   const video = findLargestPlayingVideo();
   if (!video) {
@@ -477,16 +507,22 @@ function setupDocPipWindow(pipWindow, video, openedW, openedH) {
       return true;
     }
     // Use saved size if available, otherwise use video element size
-    chrome.storage.local.get({ pipW: 0, pipH: 0 }, (stored) => {
+    chrome.runtime.sendMessage({ type: 'getPipSize' }, (stored) => {
       let w, h;
-      if (stored.pipW > 0) { w = stored.pipW; h = stored.pipH; }
+      if (stored && stored.w > 0) { w = stored.w; h = stored.h; }
       else {
         const videoRect = video.getBoundingClientRect();
         w = Math.max(320, Math.round(videoRect.width))  || 640;
         h = Math.max(180, Math.round(videoRect.height)) || 360;
       }
       window.documentPictureInPicture.requestWindow({ width: w, height: h })
-        .then(pipWindow => setupDocPipWindow(pipWindow, video, w, h))
+        .then(pipWindow => {
+          // Restore last position if available
+          if (stored && stored.x != null && stored.y != null) {
+            try { pipWindow.moveTo(stored.x, stored.y); } catch(_) {}
+          }
+          setupDocPipWindow(pipWindow, video, w, h);
+        })
         .catch(err => {
           console.warn('[PiP] Document PiP failed, using overlay:', err);
           openOverlayWithStream(video);
