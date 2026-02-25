@@ -34,23 +34,25 @@ chrome.storage.local.get({ pipSizeW: 0, pipSizeH: 0, pipSizeX: null, pipSizeY: n
   _pipH = s.pipSizeH;
   _pipX = s.pipSizeX;
   _pipY = s.pipSizeY;
-  console.log('[BG v1.62] restored from storage:', _pipW + 'x' + _pipH, '@(' + _pipX + ',' + _pipY + ')');
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === 'getPipSize') {
-    console.log('[BG v1.62] getPipSize →', _pipW + 'x' + _pipH, '@(' + _pipX + ',' + _pipY + ')');
     reply({ w: _pipW, h: _pipH, x: _pipX, y: _pipY });
     return true;
   }
   if (msg.type === 'setPipSize' && msg.w > 0 && msg.h > 0) {
-    const prevW = _pipW, prevH = _pipH, prevX = _pipX, prevY = _pipY;
     _pipW = msg.w;
     _pipH = msg.h;
     _pipX = (msg.x != null) ? msg.x : _pipX;
     _pipY = (msg.y != null) ? msg.y : _pipY;
-    console.log('[BG v1.62] setPipSize', prevW + 'x' + prevH + ' @(' + prevX + ',' + prevY + ')', '→', _pipW + 'x' + _pipH + ' @(' + _pipX + ',' + _pipY + ')');
+    console.log('[PiP saved] ' + _pipW + 'x' + _pipH + ' @(' + _pipX + ',' + _pipY + ')');
     chrome.storage.local.set({ pipSizeW: _pipW, pipSizeH: _pipH, pipSizeX: _pipX, pipSizeY: _pipY });
+    reply({ ok: true });
+    return true;
+  }
+  if (msg.type === 'pipLog') {
+    if (msg.msg) console.log(msg.msg);
     reply({ ok: true });
     return true;
   }

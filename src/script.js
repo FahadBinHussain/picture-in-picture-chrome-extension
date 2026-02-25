@@ -229,7 +229,7 @@ function openOverlayWithStream(video) {
 
 // ─── Document PiP setup (Chrome 116+, if available) ──────────────────────────
 
-function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
+function setupDocPipWindow(pipWindow, video) {
   window._docPipWindow = pipWindow;
 
   const style = pipWindow.document.createElement('style');
@@ -278,6 +278,9 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
       border-radius: 50%; background: #fff; cursor: pointer;
     }
     #pip-time { color: #ccc; font-size: 10px; font-family: monospace; flex-shrink: 0; white-space: nowrap; }
+    /* Save-size button */
+    #pip-save { color: #aaa; font-size: 14px; }
+    #pip-save.active { color: #0f0; }
     #pip-controls[data-size="tiny"] #pip-seek,
     #pip-controls[data-size="tiny"] #pip-vol,
     #pip-controls[data-size="tiny"] #pip-time,
@@ -341,6 +344,9 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
   const playBtn = mkBtn('pip-play', svgPlay, 'Play/Pause');
   const nextBtn = mkBtn('pip-next', svgNext, 'Next');
   const muteBtn = mkBtn('pip-mute', svgVol,  'Mute');
+  const saveBtn = pipWindow.document.createElement('button');
+  saveBtn.className = 'pip-btn'; saveBtn.id = 'pip-save'; saveBtn.title = 'Save size & position';
+  saveBtn.textContent = '💾';
 
   const seek = pipWindow.document.createElement('input');
   seek.type = 'range'; seek.id = 'pip-seek'; seek.min = 0; seek.max = 1; seek.step = 0.001; seek.value = 0;
@@ -351,7 +357,7 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
   const timeEl = pipWindow.document.createElement('span');
   timeEl.id = 'pip-time'; timeEl.textContent = '0:00';
 
-  controls.append(prevBtn, playBtn, nextBtn, seek, timeEl, muteBtn, volSlider);
+  controls.append(prevBtn, playBtn, nextBtn, seek, timeEl, muteBtn, volSlider, saveBtn);
   wrap.appendChild(controls);
   pipWindow.document.body.appendChild(wrap);
 
@@ -394,51 +400,41 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
   });
   ro.observe(pipWindow.document.body);
 
-  // ── Size + position persistence ───────────────────────────────────────────
-  // We track the *requested* size as canonical. Chrome may deliver slightly different
-  // innerWidth/Height due to DPR rounding — saving that would cause drift each session.
-  // We only update canonical size when the user *manually* resizes (size change > 4px).
-  const snapToGrid = (v) => {
-    const dpr = pipWindow.devicePixelRatio || 1;
-    return Math.round(Math.round(v * dpr) / dpr);
+  // ── Debug badge (top-right, shows live size + position) ───────────────────
+  const dbg = pipWindow.document.createElement('div');
+  Object.assign(dbg.style, {
+    position:'fixed', top:'4px', right:'4px', zIndex:'9999',
+    background:'rgba(0,0,0,.8)', color:'#0f0', fontFamily:'monospace',
+    fontSize:'10px', padding:'2px 5px', borderRadius:'3px', pointerEvents:'none',
+    lineHeight:'1.5', whiteSpace:'nowrap'
+  });
+  pipWindow.document.body.appendChild(dbg);
+  const updateDbg = () => {
+    dbg.textContent = pipWindow.innerWidth + '×' + pipWindow.innerHeight + ' @(' + pipWindow.screenX + ',' + pipWindow.screenY + ')';
   };
-  let canonW = requestedW || snapToGrid(pipWindow.innerWidth  || 0);
-  let canonH = requestedH || snapToGrid(pipWindow.innerHeight || 0);
-  const saveGeometry = () => {
-    const x = pipWindow.screenX;
-    const y = pipWindow.screenY;
-    if (canonW > 0 && canonH > 0) chrome.runtime.sendMessage({ type: 'setPipSize', w: canonW, h: canonH, x, y });
-  };
-  // After 800ms, if Chrome drifted the window size due to DPR rounding, snap it back.
-  setTimeout(() => {
-    if (pipWindow.closed) return;
-    const curW = pipWindow.innerWidth  || 0;
-    const curH = pipWindow.innerHeight || 0;
-    if (canonW > 0 && canonH > 0 && (curW !== canonW || curH !== canonH)) {
-      try { pipWindow.resizeTo(canonW, canonH); } catch(_) {}
+  pipWindow.addEventListener('resize', updateDbg);
+  // 'move' event doesn't reliably fire on Document PiP — poll screenX/Y instead
+  const movePoller = pipWindow.setInterval(() => {
+    if (pipWindow.closed) { pipWindow.clearInterval(movePoller); return; }
+    updateDbg();
+  }, 500);
+  updateDbg();
+
+  // ── Save size button (position is remembered natively by Chrome) ──────────
+  saveBtn.addEventListener('click', () => {
+    const w = pipWindow.innerWidth  || 0;
+    const h = pipWindow.innerHeight || 0;
+    if (w > 0 && h > 0) {
+      saveBtn.classList.add('active');
+      pipWindow.setTimeout(() => saveBtn.classList.remove('active'), 800);
+      chrome.runtime.sendMessage({ type: 'pipLog', msg: '[PiP] 💾 saved size ' + w + 'x' + h });
+      chrome.runtime.sendMessage({ type: 'setPipSize', w, h });
     }
-  }, 800);
-  // Suppress resize events for 1500ms (initial layout storm), then only update canonical
-  // if the user resizes more than 4px (not Chrome's DPR micro-adjustment).
-  const openedAt = Date.now();
-  let saveTimer = null;
-  pipWindow.addEventListener('resize', () => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      if (Date.now() - openedAt < 1500) return;
-      const newW = snapToGrid(pipWindow.innerWidth  || 0);
-      const newH = snapToGrid(pipWindow.innerHeight || 0);
-      if (Math.abs(newW - canonW) > 4 || Math.abs(newH - canonH) > 4) {
-        canonW = newW;
-        canonH = newH;
-      }
-      saveGeometry();
-    }, 400);
   });
 
+  // ── Pagehide: cleanup only (no size save — prevents drifted size from being stored) ──
   pipWindow.addEventListener('pagehide', () => {
-    clearTimeout(saveTimer);
-    saveGeometry();
+    pipWindow.clearInterval(movePoller);
     ro.disconnect();
     if (stream) {
       stream.getTracks().forEach(t => t.stop());
@@ -456,7 +452,7 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
   // ── Version toast (runs unconditionally in the top-level frame) ───────────
   if (window === window.top) {
     const toast = document.createElement('div');
-    toast.textContent = '✅ PiP v1.62';
+    toast.textContent = '✅ PiP v1.71';
     Object.assign(toast.style, {
       position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
       zIndex: '2147483647',
@@ -471,7 +467,7 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
     setTimeout(() => { toast.remove(); }, 4100);
   }
 
-  console.log('[PiP v1.62] frame:', window === window.top ? 'TOP' : 'IFRAME', '| documentPictureInPicture:', typeof window.documentPictureInPicture !== 'undefined');
+  console.log('[PiP v1.71] frame:', window === window.top ? 'TOP' : 'IFRAME', '| documentPictureInPicture:', typeof window.documentPictureInPicture !== 'undefined');
 
   const video = findLargestPlayingVideo();
   if (!video) {
@@ -517,11 +513,7 @@ function setupDocPipWindow(pipWindow, video, requestedW, requestedH) {
       }
       window.documentPictureInPicture.requestWindow({ width: w, height: h })
         .then(pipWindow => {
-          // Restore last position if available
-          if (stored && stored.x != null && stored.y != null) {
-            try { pipWindow.moveTo(stored.x, stored.y); } catch(_) {}
-          }
-          setupDocPipWindow(pipWindow, video, w, h);
+          setupDocPipWindow(pipWindow, video);
         })
         .catch(err => {
           console.warn('[PiP] Document PiP failed, using overlay:', err);

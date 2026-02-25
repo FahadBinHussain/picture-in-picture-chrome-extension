@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-console.log('[AutoPiP v1.62] script loaded, frame:', window === window.top ? 'TOP' : 'IFRAME');
+// autoPip.js — v1.71
 
 function findLargestPlayingVideo() {
   const videos = Array.from(document.querySelectorAll("video"))
@@ -28,7 +28,6 @@ function findLargestPlayingVideo() {
 
 //  Auto-PiP via visibilitychange 
 document.addEventListener("visibilitychange", () => {
-  console.log('[AutoPiP v1.62] visibilitychange hidden:', document.hidden);
   if (document.hidden) {
     triggerAutoPip();
   } else {
@@ -38,47 +37,43 @@ document.addEventListener("visibilitychange", () => {
 
 try {
   navigator.mediaSession.setActionHandler("enterpictureinpicture", () => {
-    console.log('[AutoPiP v1.62] mediaSession enterpictureinpicture');
     triggerAutoPip();
   });
 } catch (_) {}
 
 function triggerAutoPip() {
   const video = findLargestPlayingVideo();
-  console.log('[AutoPiP v1.62] triggerAutoPip, video:', video ? 'found (' + (video.videoWidth||0) + 'x' + (video.videoHeight||0) + ')' : 'null');
   if (!video) return;
 
-  // Already open — don't open another
-  if (window._autoPipWindow && !window._autoPipWindow.closed) return;
+  // If a pip window exists but is still closing (pagehide not yet fired after .close()),
+  // wait for it to fully unload before opening a new one — Chrome rejects concurrent opens.
+  if (window._autoPipWindow && !window._autoPipWindow.closed) {
+    window._autoPipWindow.addEventListener('pagehide', () => {
+      setTimeout(() => { if (document.hidden) triggerAutoPip(); }, 100);
+    }, { once: true });
+    return;
+  }
 
-  if (typeof window.documentPictureInPicture === 'undefined') return; // no fallback popup
+  if (typeof window.documentPictureInPicture === 'undefined') return;
 
   chrome.runtime.sendMessage({ type: 'getPipSize' }, (stored) => {
-    // Re-check after async get (user may have returned to tab)
     if (!document.hidden) return;
     if (window._autoPipWindow && !window._autoPipWindow.closed) return;
 
     const w = (stored && stored.w > 0) ? stored.w : Math.max(320, video.videoWidth  || 640);
     const h = (stored && stored.h > 0) ? stored.h : Math.max(180, video.videoHeight || 360);
-    const x = (stored && stored.x != null) ? stored.x : undefined;
-    const y = (stored && stored.y != null) ? stored.y : undefined;
     window.documentPictureInPicture.requestWindow({ width: w, height: h })
       .then((pipWin) => {
-        console.log('[AutoPiP v1.62] Document PiP window opened');
-        // Restore position if we have one
-        if (x != null && y != null) {
-          try { pipWin.moveTo(x, y); } catch(_) {}
-        }
         window._autoPipWindow = pipWin;
-        setupAutoPipWindow(pipWin, video, w, h);
+        setupAutoPipWindow(pipWin, video);
       })
       .catch((err) => {
-        console.log('[AutoPiP v1.62] Document PiP failed (no fallback):', err.message);
+        console.log('[AutoPiP v1.71] Document PiP failed:', err.message);
       });
   });
 }
 
-function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
+function setupAutoPipWindow(pipWin, video) {
   const style = pipWin.document.createElement("style");
   style.textContent = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -140,6 +135,9 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
       color: #ccc; font-size: 10px; font-family: monospace;
       flex-shrink: 0; white-space: nowrap;
     }
+    /* Save-size button */
+    #pip-save { color: #aaa; font-size: 14px; }
+    #pip-save.active { color: #0f0; }
     /* Responsive hiding via data-size on #pip-controls */
     #pip-controls[data-size="tiny"] #pip-seek,
     #pip-controls[data-size="tiny"] #pip-vol,
@@ -193,10 +191,10 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
 
   const svgPlay = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
   const svgPause = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
-  const svgPrev = '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6V6zm3.5 6 8.5 6V6L9.5 12z"/></svg>';
-  const svgNext = '<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 4V8l-5.5 4zM16 6h2v12h-2V6z"/></svg>';
-  const svgMute = '<svg viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97V11.18l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.7 8.7 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zm-13.27-4L4 9.27 7.73 13H4v4h4l5 5v-6.73L8.27 10.73l-2.54-2.73zM11.5 5L9.91 6.59 11.5 8.18V5z"/></svg>';
-  const svgVol  = '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>';
+  const svgPrev  = '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6V6zm3.5 6 8.5 6V6L9.5 12z"/></svg>';
+  const svgNext  = '<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 4V8l-5.5 4zM16 6h2v12h-2V6z"/></svg>';
+  const svgMute  = '<svg viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97V11.18l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.7 8.7 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zm-13.27-4L4 9.27 7.73 13H4v4h4l5 5v-6.73L8.27 10.73l-2.54-2.73zM11.5 5L9.91 6.59 11.5 8.18V5z"/></svg>';
+  const svgVol   = '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>';
 
   const mkBtn = (id, svg, title) => {
     const b = pipWin.document.createElement("button");
@@ -208,6 +206,9 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
   const playBtn  = mkBtn("pip-play",  svgPlay,  "Play/Pause");
   const nextBtn  = mkBtn("pip-next",  svgNext,  "Next");
   const muteBtn  = mkBtn("pip-mute",  svgVol,   "Mute");
+  const saveBtn  = pipWin.document.createElement("button");
+  saveBtn.className = "pip-btn"; saveBtn.id = "pip-save"; saveBtn.title = "Save size & position";
+  saveBtn.textContent = "💾";
 
   const seek = pipWin.document.createElement("input");
   seek.type = "range"; seek.id = "pip-seek"; seek.min = 0; seek.max = 1; seek.step = 0.001; seek.value = 0;
@@ -218,7 +219,7 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
   const timeEl = pipWin.document.createElement("span");
   timeEl.id = "pip-time"; timeEl.textContent = "0:00";
 
-  controls.append(prevBtn, playBtn, nextBtn, seek, timeEl, muteBtn, volSlider);
+  controls.append(prevBtn, playBtn, nextBtn, seek, timeEl, muteBtn, volSlider, saveBtn);
   wrap.appendChild(controls);
   pipWin.document.body.appendChild(wrap);
 
@@ -270,7 +271,6 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
     else if (w < 320) tier = "medium";
     else              tier = "large";
     controls.dataset.size = tier;
-    try { pipWin.console.log(`[AutoPiP] size=${tier} | w=${Math.round(w)}px h=${Math.round(h)}px`); } catch(_) {}
   });
   ro.observe(pipWin.document.body);
 
@@ -287,70 +287,44 @@ function setupAutoPipWindow(pipWin, video, requestedW, requestedH) {
     dbg.textContent = pipWin.innerWidth + "×" + pipWin.innerHeight + " @(" + pipWin.screenX + "," + pipWin.screenY + ")";
   };
   pipWin.addEventListener("resize", updateDbg);
-  pipWin.addEventListener("move",   updateDbg);
+  // 'move' event doesn't reliably fire on Document PiP — poll screenX/Y instead
+  const movePoller = pipWin.setInterval(() => {
+    if (pipWin.closed) { pipWin.clearInterval(movePoller); return; }
+    updateDbg();
+  }, 500);
   updateDbg();
 
-  // ── Size + position persistence ───────────────────────────────────────────
-  // We track the *requested* size as canonical. Chrome may deliver slightly different
-  // innerWidth/Height due to DPR rounding — saving that would cause drift each session.
-  // We only update canonical size when the user *manually* resizes (size change > 4px).
-  const snapToGrid = (v) => {
-    const dpr = pipWin.devicePixelRatio || 1;
-    return Math.round(Math.round(v * dpr) / dpr);
-  };
-  let canonW = requestedW || snapToGrid(pipWin.innerWidth  || 0);
-  let canonH = requestedH || snapToGrid(pipWin.innerHeight || 0);
-  // Save canonical size + current position
-  const saveGeometry = () => {
-    const x = pipWin.screenX;
-    const y = pipWin.screenY;
-    if (canonW > 0 && canonH > 0) chrome.runtime.sendMessage({ type: 'setPipSize', w: canonW, h: canonH, x, y });
-  };
-  // After 800ms, if Chrome drifted the window size due to DPR rounding, snap it back.
-  setTimeout(() => {
-    if (pipWin.closed) return;
-    const curW = pipWin.innerWidth  || 0;
-    const curH = pipWin.innerHeight || 0;
-    if (canonW > 0 && canonH > 0 && (curW !== canonW || curH !== canonH)) {
-      try { pipWin.resizeTo(canonW, canonH); } catch(_) {}
+  // ── Save size button (position is remembered natively by Chrome) ──────────
+  saveBtn.addEventListener('click', () => {
+    const w = pipWin.innerWidth  || 0;
+    const h = pipWin.innerHeight || 0;
+    if (w > 0 && h > 0) {
+      saveBtn.classList.add('active');
+      pipWin.setTimeout(() => saveBtn.classList.remove('active'), 800);
+      chrome.runtime.sendMessage({ type: 'pipLog', msg: '[AutoPiP] 💾 saved size ' + w + 'x' + h });
+      chrome.runtime.sendMessage({ type: 'setPipSize', w, h });
     }
-  }, 800);
-  // Suppress resize events for 1500ms (initial layout storm), then only update canonical
-  // if the user resizes more than 4px (not Chrome's DPR micro-adjustment).
-  const openedAt = Date.now();
-  let saveTimer = null;
-  pipWin.addEventListener("resize", () => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      if (Date.now() - openedAt < 1500) return;
-      const newW = snapToGrid(pipWin.innerWidth  || 0);
-      const newH = snapToGrid(pipWin.innerHeight || 0);
-      if (Math.abs(newW - canonW) > 4 || Math.abs(newH - canonH) > 4) {
-        canonW = newW;
-        canonH = newH;
-      }
-      saveGeometry();
-    }, 400);
   });
 
+  // ── Pagehide: cleanup only (no size save — prevents drifted size from being stored) ──
+  let _autoClosing = false;
   pipWin.addEventListener("pagehide", () => {
-    clearTimeout(saveTimer);
-    saveGeometry();
+    pipWin.clearInterval(movePoller);
     ro.disconnect();
     if (stream) stream.getTracks().forEach((t) => t.stop());
     else { document.body.appendChild(video); video.removeAttribute("__autopip__"); }
     window._autoPipWindow = null;
   });
+  pipWin._setAutoClosing = () => { _autoClosing = true; };
 }
 
 function stopAutoPip() {
-  console.log('[AutoPiP v1.62] stopAutoPip, _autoPipWindow:', window._autoPipWindow ? 'exists' : 'null');
   if (window._autoPipWindow && !window._autoPipWindow.closed) {
+    try { window._autoPipWindow._setAutoClosing(); } catch(_) {}
     window._autoPipWindow.close();
+  } else {
+    window._autoPipWindow = null;
   }
-  window._autoPipWindow = null;
-
-  // Return video node if it was moved
   const movedVideo = document.querySelector('video[__autopip__]');
   if (movedVideo) {
     document.body.appendChild(movedVideo);
