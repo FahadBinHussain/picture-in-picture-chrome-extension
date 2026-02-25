@@ -13,6 +13,9 @@
 // limitations under the License.
 
 chrome.action.onClicked.addListener((tab) => {
+  // Inject into all frames so videos inside iframes are found.
+  // script.js uses captureStream() + injects overlay into the top-level document,
+  // so cross-frame videos are mirrored without moving DOM nodes.
   chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
     files: ["script.js"],
@@ -50,10 +53,13 @@ function updateContentScripts(autoPip) {
     chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] });
     return;
   }
-  chrome.scripting.registerContentScripts([{
-    id: "autoPip",
-    js: ["autoPip.js"],
-    matches: ["<all_urls>"],
-    runAt: "document_start"
-  }])
+  // Always unregister first so updated settings take effect immediately
+  chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] }, () => {
+    chrome.scripting.registerContentScripts([{
+      id: "autoPip",
+      js: ["autoPip.js"],
+      matches: ["<all_urls>"],
+      runAt: "document_idle"
+    }]);
+  });
 }
