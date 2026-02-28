@@ -41,6 +41,51 @@ try {
   });
 } catch (_) {}
 
+// Listen for messages from background.js (keyboard shortcut + icon click)
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'openPip') {
+    console.log('[AutoPiP] Opening PiP via message');
+    manualTriggerPip();
+    sendResponse({ ok: true });
+    return true;
+  }
+});
+
+// Manual trigger (doesn't check document.hidden)
+function manualTriggerPip() {
+  const video = findLargestPlayingVideo();
+  if (!video) {
+    console.log('[AutoPiP] No video found');
+    return;
+  }
+
+  // If a pip window exists but is still closing, wait
+  if (window._autoPipWindow && !window._autoPipWindow.closed) {
+    console.log('[AutoPiP] PiP window already open');
+    return;
+  }
+
+  if (typeof window.documentPictureInPicture === 'undefined') {
+    console.log('[AutoPiP] documentPictureInPicture not available');
+    return;
+  }
+
+  chrome.runtime.sendMessage({ type: 'getPipSize' }, (stored) => {
+    if (window._autoPipWindow && !window._autoPipWindow.closed) return;
+
+    const w = (stored && stored.w > 0) ? stored.w : Math.max(320, video.videoWidth  || 640);
+    const h = (stored && stored.h > 0) ? stored.h : Math.max(180, video.videoHeight || 360);
+    window.documentPictureInPicture.requestWindow({ width: w, height: h })
+      .then((pipWin) => {
+        window._autoPipWindow = pipWin;
+        setupAutoPipWindow(pipWin, video);
+      })
+      .catch((err) => {
+        console.log('[AutoPiP v1.71] Document PiP failed:', err.message);
+      });
+  });
+}
+
 function triggerAutoPip() {
   const video = findLargestPlayingVideo();
   if (!video) return;
@@ -136,24 +181,29 @@ function setupAutoPipWindow(pipWin, video) {
       flex-shrink: 0; white-space: nowrap;
     }
     /* Save-size button */
-    #pip-save { color: #aaa; font-size: 14px; }
-    #pip-save.active { color: #0f0; }
+    #pip-save { 
+      color: #aaa; 
+      font-size: 14px; 
+      transition: all 0.3s ease;
+    }
+    #pip-save.active { 
+      color: #0f0; 
+      transform: scale(1.3);
+      text-shadow: 0 0 10px #0f0;
+    }
     /* Responsive hiding via data-size on #pip-controls */
     #pip-controls[data-size="tiny"] #pip-seek,
     #pip-controls[data-size="tiny"] #pip-vol,
-    #pip-controls[data-size="tiny"] #pip-time,
     #pip-controls[data-size="tiny"] #pip-prev,
     #pip-controls[data-size="tiny"] #pip-next,
     #pip-controls[data-size="tiny"] #pip-mute { display: none; }
 
     #pip-controls[data-size="small"] #pip-seek,
     #pip-controls[data-size="small"] #pip-vol,
-    #pip-controls[data-size="small"] #pip-time,
     #pip-controls[data-size="small"] #pip-prev,
     #pip-controls[data-size="small"] #pip-next { display: none; }
 
     #pip-controls[data-size="medium"] #pip-vol,
-    #pip-controls[data-size="medium"] #pip-time,
     #pip-controls[data-size="medium"] #pip-prev,
     #pip-controls[data-size="medium"] #pip-next { display: none; }
   `;
@@ -225,7 +275,12 @@ function setupAutoPipWindow(pipWin, video) {
 
   // ── Control logic (all actions on the source `video`) ─────────────────────
   const fmt = (s) => {
-    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+    }
     return `${m}:${sec.toString().padStart(2,'0')}`;
   };
 
@@ -275,6 +330,8 @@ function setupAutoPipWindow(pipWin, video) {
   ro.observe(pipWin.document.body);
 
   // ── Debug badge (top-right, shows live size + position) ───────────────────
+  // Commented out - debug info hidden
+  /*
   const dbg = pipWin.document.createElement("div");
   Object.assign(dbg.style, {
     position:"fixed", top:"4px", right:"4px", zIndex:"9999",
@@ -293,6 +350,7 @@ function setupAutoPipWindow(pipWin, video) {
     updateDbg();
   }, 500);
   updateDbg();
+  */
 
   // ── Save size button (position is remembered natively by Chrome) ──────────
   saveBtn.addEventListener('click', () => {

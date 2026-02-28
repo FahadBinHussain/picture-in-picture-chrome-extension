@@ -25,7 +25,9 @@ The keyboard shortcut (defaults to `Alt-P`) can be changed on the Chrome Extensi
 - `autoPip.js` runs as a content script on every page
 - Listens to `visibilitychange` — when the tab is hidden, automatically opens a PiP window
 - When you return to the tab, the PiP window is closed
-- Also responds to `mediaSession` `enterpictureinpicture` events
+- Also responds to `mediaSession` `enterpictureinpicture` events (Chrome 134+ automatic pip promotion)
+
+> ⚠️ **Auto PiP requires the video to be unmuted and playing.** If the video is muted, Chrome does not treat it as active media and the tab-switch trigger will not fire (or will hit the activation budget limit after ~2 times). Unmute the video for unlimited auto-pip on tab switch.
 
 ### Controls in the PiP Window
 Both manual and auto PiP windows include a controls bar:

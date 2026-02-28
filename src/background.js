@@ -12,13 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Track last click time for double-click detection
+let lastClickTime = 0;
+const DOUBLE_CLICK_DELAY = 400; // milliseconds
+
 chrome.action.onClicked.addListener((tab) => {
-  // Inject into all frames so videos inside iframes are found.
-  // script.js uses captureStream() + injects overlay into the top-level document,
-  // so cross-frame videos are mirrored without moving DOM nodes.
-  chrome.scripting.executeScript({
-    target: { tabId: tab.id, allFrames: true },
-    files: ["script.js"],
+  const now = Date.now();
+  const timeSinceLastClick = now - lastClickTime;
+  lastClickTime = now;
+
+  // Double-click detected
+  if (timeSinceLastClick < DOUBLE_CLICK_DELAY) {
+    // Open settings page
+    chrome.runtime.openOptionsPage();
+    return;
+  }
+
+  // Single click - send message to autoPip.js to open PiP
+  chrome.tabs.sendMessage(tab.id, { type: 'openPip' }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log('[Background] Error:', chrome.runtime.lastError.message);
+    }
   });
 });
 
@@ -56,6 +70,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     reply({ ok: true });
     return true;
   }
+  if (msg.type === 'updateSites') {
+    // Re-register content scripts with updated site list
+    chrome.storage.local.get({ autoPip: true }, (result) => {
+      if (result.autoPip) {
+        updateContentScripts(true);
+      }
+    });
+    reply({ ok: true });
+    return true;
+  }
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -89,13 +113,39 @@ function updateContentScripts(autoPip) {
     chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] });
     return;
   }
-  // Always unregister first so updated settings take effect immediately
-  chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] }, () => {
-    chrome.scripting.registerContentScripts([{
-      id: "autoPip",
-      js: ["autoPip.js"],
-      matches: ["<all_urls>"],
-      runAt: "document_idle"
-    }]);
+  
+  // Get enabled sites from storage
+  chrome.storage.local.get({ enabledSites: 'https://www.youtube.com/*\nhttps://www.netflix.com/*\nhttps://vimeo.com/*\nhttps://www.twitch.tv/*' }, (result) => {
+    const sites = result.enabledSites
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s && !s.startsWith('#'));
+    
+    // Always unregister first so updated settings take effect immediately
+    chrome.scripting.unregisterContentScripts({ ids: ["autoPip"] }, () => {
+      chrome.scripting.registerContentScripts([{
+        id: "autoPip",
+        js: ["autoPip.js"],
+        matches: sites.length > 0 ? sites : ["<all_urls>"],
+        runAt: "document_idle"
+      }]);
+    });
   });
 }
+
+// ── Keyboard shortcut handler ──────────────────────────────────────────────
+chrome.commands.onCommand.addListener(async (command) => {
+  console.log('[Background] Command triggered:', command);
+  if (command === "open-pip") {
+    console.log('[Background] Opening PiP...');
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    console.log('[Background] Active tab:', tab);
+    if (tab && tab.id) {
+      chrome.tabs.sendMessage(tab.id, { type: 'openPip' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.log('[Background] Error:', chrome.runtime.lastError.message);
+        }
+      });
+    }
+  }
+});
