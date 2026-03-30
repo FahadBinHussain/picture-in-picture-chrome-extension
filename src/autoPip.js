@@ -393,9 +393,23 @@ function setupAutoPipWindow(pipWin, video) {
       window.dispatchEvent(up);
     } catch (_) {}
   };
+  const queryDeep = (root, selector) => {
+    const queue = [root];
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || !node.querySelector) continue;
+      const hit = node.querySelector(selector);
+      if (hit) return hit;
+      const all = node.querySelectorAll("*");
+      for (const el of all) {
+        if (el.shadowRoot) queue.push(el.shadowRoot);
+      }
+    }
+    return null;
+  };
   const clickFirst = (root, selectors) => {
     for (const sel of selectors) {
-      const el = root.querySelector(sel);
+      const el = queryDeep(root, sel);
       if (el) {
         el.click();
         return true;
@@ -406,6 +420,9 @@ function setupAutoPipWindow(pipWin, video) {
   const runTrackAction = (dir) => {
     const selectors = dir === "prev"
       ? [
+          "ytmusic-player-bar tp-yt-paper-icon-button.previous-button",
+          "ytmusic-player-bar .previous-button",
+          "button.previous-button",
           ".ytp-prev-button",
           "button[aria-label*='Previous']",
           "button[title*='Previous']",
@@ -414,6 +431,9 @@ function setupAutoPipWindow(pipWin, video) {
           "[data-testid*='prev']"
         ]
       : [
+          "ytmusic-player-bar tp-yt-paper-icon-button.next-button",
+          "ytmusic-player-bar .next-button",
+          "button.next-button",
           ".ytp-next-button",
           "button[aria-label*='Next']",
           "button[title*='Next']",
