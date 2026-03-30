@@ -194,12 +194,16 @@ function setupAutoPipWindow(pipWin, video) {
     /* Responsive hiding via data-size on #pip-controls */
     #pip-controls[data-size="tiny"] #pip-seek,
     #pip-controls[data-size="tiny"] #pip-vol,
+    #pip-controls[data-size="tiny"] #pip-back10,
+    #pip-controls[data-size="tiny"] #pip-fwd10,
     #pip-controls[data-size="tiny"] #pip-prev,
     #pip-controls[data-size="tiny"] #pip-next,
     #pip-controls[data-size="tiny"] #pip-mute { display: none; }
 
     #pip-controls[data-size="small"] #pip-seek,
     #pip-controls[data-size="small"] #pip-vol,
+    #pip-controls[data-size="small"] #pip-back10,
+    #pip-controls[data-size="small"] #pip-fwd10,
     #pip-controls[data-size="small"] #pip-prev,
     #pip-controls[data-size="small"] #pip-next { display: none; }
 
@@ -243,6 +247,8 @@ function setupAutoPipWindow(pipWin, video) {
   const svgPause = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
   const svgPrev  = '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6V6zm3.5 6 8.5 6V6L9.5 12z"/></svg>';
   const svgNext  = '<svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 4V8l-5.5 4zM16 6h2v12h-2V6z"/></svg>';
+  const svgBack10 = '<svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6L11 18zm1.5 0h2V6h-2v12zm4.5 0h2V6h-2v12z"/></svg>';
+  const svgFwd10 = '<svg viewBox="0 0 24 24"><path d="M13 6v12l8.5-6L13 6zm-1.5 0h-2v12h2V6zM7 6H5v12h2V6z"/></svg>';
   const svgMute  = '<svg viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97V11.18l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.7 8.7 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zm-13.27-4L4 9.27 7.73 13H4v4h4l5 5v-6.73L8.27 10.73l-2.54-2.73zM11.5 5L9.91 6.59 11.5 8.18V5z"/></svg>';
   const svgVol   = '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>';
 
@@ -255,6 +261,8 @@ function setupAutoPipWindow(pipWin, video) {
   const prevBtn  = mkBtn("pip-prev",  svgPrev,  "Previous");
   const playBtn  = mkBtn("pip-play",  svgPlay,  "Play/Pause");
   const nextBtn  = mkBtn("pip-next",  svgNext,  "Next");
+  const back10Btn = mkBtn("pip-back10", svgBack10, "Back 10s");
+  const fwd10Btn = mkBtn("pip-fwd10", svgFwd10, "Forward 10s");
   const muteBtn  = mkBtn("pip-mute",  svgVol,   "Mute");
   const saveBtn  = pipWin.document.createElement("button");
   saveBtn.className = "pip-btn"; saveBtn.id = "pip-save"; saveBtn.title = "Save size & position";
@@ -269,7 +277,7 @@ function setupAutoPipWindow(pipWin, video) {
   const timeEl = pipWin.document.createElement("span");
   timeEl.id = "pip-time"; timeEl.textContent = "0:00";
 
-  controls.append(prevBtn, playBtn, nextBtn, seek, timeEl, muteBtn, volSlider, saveBtn);
+  controls.append(prevBtn, back10Btn, playBtn, fwd10Btn, nextBtn, seek, timeEl, muteBtn, volSlider, saveBtn);
   wrap.appendChild(controls);
   pipWin.document.body.appendChild(wrap);
 
@@ -299,22 +307,72 @@ function setupAutoPipWindow(pipWin, video) {
 
   playBtn.addEventListener("click", () => { video.paused ? video.play() : video.pause(); });
   muteBtn.addEventListener("click", () => { video.muted = !video.muted; });
-  prevBtn.addEventListener("click", () => {
-    if (navigator.mediaSession && navigator.mediaSession.metadata)
-      navigator.mediaSession.callActionHandler('previoustrack');
-    else video.currentTime = Math.max(0, video.currentTime - 10);
-  });
-  nextBtn.addEventListener("click", () => {
-    if (navigator.mediaSession && navigator.mediaSession.metadata)
-      navigator.mediaSession.callActionHandler('nexttrack');
-    else video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
-  });
+  const seekBy = (seconds) => {
+    const duration = Number.isFinite(video.duration) ? video.duration : Infinity;
+    const nextTime = Math.max(0, Math.min(duration, video.currentTime + seconds));
+    video.currentTime = nextTime;
+  };
+  const pressMediaKey = (key, code) => {
+    try {
+      const down = new KeyboardEvent("keydown", { key, code, bubbles: true });
+      const up = new KeyboardEvent("keyup", { key, code, bubbles: true });
+      document.dispatchEvent(down);
+      window.dispatchEvent(down);
+      document.dispatchEvent(up);
+      window.dispatchEvent(up);
+    } catch (_) {}
+  };
+  const clickFirst = (root, selectors) => {
+    for (const sel of selectors) {
+      const el = root.querySelector(sel);
+      if (el) {
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  };
+  const runTrackAction = (dir) => {
+    const selectors = dir === "prev"
+      ? [
+          ".ytp-prev-button",
+          "button[aria-label*='Previous']",
+          "button[title*='Previous']",
+          "button[aria-label*='Prev']",
+          "[data-testid*='previous']",
+          "[data-testid*='prev']"
+        ]
+      : [
+          ".ytp-next-button",
+          "button[aria-label*='Next']",
+          "button[title*='Next']",
+          "[data-testid*='next']"
+        ];
+    if (clickFirst(document, selectors)) return;
+    for (const frame of document.querySelectorAll("iframe")) {
+      try {
+        if (frame.contentDocument && clickFirst(frame.contentDocument, selectors)) return;
+      } catch (_) {}
+    }
+    if (dir === "prev") pressMediaKey("MediaTrackPrevious", "MediaTrackPrevious");
+    else pressMediaKey("MediaTrackNext", "MediaTrackNext");
+  };
+  prevBtn.addEventListener("click", () => { runTrackAction("prev"); });
+  nextBtn.addEventListener("click", () => { runTrackAction("next"); });
+  back10Btn.addEventListener("click", () => { seekBy(-10); });
+  fwd10Btn.addEventListener("click", () => { seekBy(10); });
 
   let seeking = false;
   seek.addEventListener("mousedown", () => { seeking = true; });
-  seek.addEventListener("input", () => { if (video.duration) video.currentTime = seek.value * video.duration; });
+  seek.addEventListener("input", () => {
+    if (video.duration) video.currentTime = Number(seek.value) * video.duration;
+  });
   seek.addEventListener("mouseup",   () => { seeking = false; });
-  volSlider.addEventListener("input", () => { video.volume = volSlider.value; video.muted = volSlider.value == 0; });
+  volSlider.addEventListener("input", () => {
+    const vol = Number(volSlider.value);
+    video.volume = vol;
+    video.muted = vol === 0;
+  });
 
   // ── Responsive: adjust controls based on window width ─────────────────────
   const ro = new pipWin.ResizeObserver(([entry]) => {
@@ -352,15 +410,17 @@ function setupAutoPipWindow(pipWin, video) {
   updateDbg();
   */
 
-  // ── Save size button (position is remembered natively by Chrome) ──────────
+  // ── Save size and position button ──────────
   saveBtn.addEventListener('click', () => {
     const w = pipWin.innerWidth  || 0;
     const h = pipWin.innerHeight || 0;
+    const x = pipWin.screenX;
+    const y = pipWin.screenY;
     if (w > 0 && h > 0) {
       saveBtn.classList.add('active');
       pipWin.setTimeout(() => saveBtn.classList.remove('active'), 800);
-      chrome.runtime.sendMessage({ type: 'pipLog', msg: '[AutoPiP] 💾 saved size ' + w + 'x' + h });
-      chrome.runtime.sendMessage({ type: 'setPipSize', w, h });
+      chrome.runtime.sendMessage({ type: 'pipLog', msg: '[AutoPiP] 💾 saved ' + w + 'x' + h + ' @(' + x + ',' + y + ')' });
+      chrome.runtime.sendMessage({ type: 'setPipSize', w, h, x, y });
     }
   });
 
