@@ -135,49 +135,70 @@ function setupAutoPipWindow(pipWin, video) {
     }
     /* Controls bar */
     #pip-controls {
+      --pad-x: 8px;
+      --pad-y: 6px;
+      --gap: 6px;
+      --btn-size: 28px;
+      --icon-size: 1em;
+      --seek-h: 4px;
+      --seek-thumb: 12px;
+      --vol-w: 56px;
+      --time-fs: 10px;
       flex: 0 0 auto;
-      background: linear-gradient(to top, rgba(0,0,0,.85) 0%, transparent 100%);
+      background: linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.3) 70%, transparent 100%);
       position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 6px 8px 6px;
-      display: flex; align-items: center; gap: 6px;
+      padding: var(--pad-y) var(--pad-x);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--gap);
       opacity: 0; transition: opacity .2s;
       z-index: 10;
     }
-    #pip-wrap:hover #pip-controls { opacity: 1; }
+    #pip-wrap:hover #pip-controls,
+    #pip-controls:focus-within { opacity: 1; }
+    .pip-row {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+    }
+    .pip-row-transport { grid-area: transport; justify-content: center; }
+    .pip-row-seek { grid-area: seek; justify-content: stretch; }
+    .pip-row-audio { grid-area: audio; justify-content: flex-end; }
     /* Buttons */
     .pip-btn {
       background: none; border: none; cursor: pointer;
       color: #fff; padding: 0; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
       border-radius: 4px; transition: background .15s;
-      width: 28px; height: 28px; font-size: 16px;
+      width: var(--btn-size); height: var(--btn-size); font-size: 16px;
     }
     .pip-btn:hover { background: rgba(255,255,255,.15); }
-    .pip-btn svg { width: 1em; height: 1em; fill: currentColor; display: block; }
+    .pip-btn svg { width: var(--icon-size); height: var(--icon-size); fill: currentColor; display: block; }
     /* Seek bar */
     #pip-seek {
       flex: 1 1 auto; min-width: 20px;
       -webkit-appearance: none; appearance: none;
-      height: 4px; border-radius: 2px;
+      height: var(--seek-h); border-radius: 2px;
       background: rgba(255,255,255,.3); cursor: pointer; outline: none;
     }
     #pip-seek::-webkit-slider-thumb {
-      -webkit-appearance: none; width: 12px; height: 12px;
+      -webkit-appearance: none; width: var(--seek-thumb); height: var(--seek-thumb);
       border-radius: 50%; background: #fff; cursor: pointer;
     }
     /* Volume */
     #pip-vol {
       -webkit-appearance: none; appearance: none;
-      width: 56px; height: 4px; border-radius: 2px;
+      width: var(--vol-w); height: var(--seek-h); border-radius: 2px;
       background: rgba(255,255,255,.3); cursor: pointer; outline: none; flex-shrink: 0;
     }
     #pip-vol::-webkit-slider-thumb {
-      -webkit-appearance: none; width: 10px; height: 10px;
+      -webkit-appearance: none; width: calc(var(--seek-thumb) - 2px); height: calc(var(--seek-thumb) - 2px);
       border-radius: 50%; background: #fff; cursor: pointer;
     }
     /* Time */
     #pip-time {
-      color: #ccc; font-size: 10px; font-family: monospace;
+      color: #ccc; font-size: var(--time-fs); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       flex-shrink: 0; white-space: nowrap;
     }
     /* Save-size button */
@@ -191,25 +212,63 @@ function setupAutoPipWindow(pipWin, video) {
       transform: scale(1.3);
       text-shadow: 0 0 10px #0f0;
     }
-    /* Responsive hiding via data-size on #pip-controls */
-    #pip-controls[data-size="tiny"] #pip-seek,
-    #pip-controls[data-size="tiny"] #pip-vol,
-    #pip-controls[data-size="tiny"] #pip-back10,
-    #pip-controls[data-size="tiny"] #pip-fwd10,
-    #pip-controls[data-size="tiny"] #pip-prev,
-    #pip-controls[data-size="tiny"] #pip-next,
-    #pip-controls[data-size="tiny"] #pip-mute { display: none; }
+    /* Adaptive tiers: keep all controls, reflow + shrink only */
+    #pip-controls[data-size="large"] {
+      --pad-x: 8px; --pad-y: 6px; --gap: 6px; --btn-size: 28px; --icon-size: 1em;
+      --seek-h: 4px; --seek-thumb: 12px; --vol-w: 56px; --time-fs: 10px;
+    }
+    #pip-controls[data-size="medium"] {
+      --pad-x: 7px; --pad-y: 5px; --gap: 5px; --btn-size: 26px; --icon-size: .95em;
+      --seek-h: 4px; --seek-thumb: 11px; --vol-w: 50px; --time-fs: 9px;
+    }
+    #pip-controls[data-size="small"] {
+      --pad-x: 6px; --pad-y: 5px; --gap: 4px; --btn-size: 24px; --icon-size: .9em;
+      --seek-h: 3px; --seek-thumb: 10px; --vol-w: 44px; --time-fs: 8px;
+    }
+    #pip-controls[data-size="tiny"] {
+      --pad-x: 5px; --pad-y: 4px; --gap: 4px; --btn-size: 22px; --icon-size: .85em;
+      --seek-h: 3px; --seek-thumb: 9px; --vol-w: 40px; --time-fs: 8px;
+    }
+    #pip-controls[data-size="nano"] {
+      --pad-x: 4px; --pad-y: 3px; --gap: 3px; --btn-size: 20px; --icon-size: .8em;
+      --seek-h: 2px; --seek-thumb: 8px; --vol-w: 34px; --time-fs: 7px;
+    }
 
-    #pip-controls[data-size="small"] #pip-seek,
-    #pip-controls[data-size="small"] #pip-vol,
-    #pip-controls[data-size="small"] #pip-back10,
-    #pip-controls[data-size="small"] #pip-fwd10,
-    #pip-controls[data-size="small"] #pip-prev,
-    #pip-controls[data-size="small"] #pip-next { display: none; }
+    #pip-controls[data-layout="single"] {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "transport transport"
+        "seek audio";
+    }
+    #pip-controls[data-layout="single"] .pip-row { min-height: var(--btn-size); }
 
-    #pip-controls[data-size="medium"] #pip-vol,
-    #pip-controls[data-size="medium"] #pip-prev,
-    #pip-controls[data-size="medium"] #pip-next { display: none; }
+    #pip-controls[data-layout="split"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "transport"
+        "seek"
+        "audio";
+    }
+
+    #pip-controls[data-layout="stack"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "transport"
+        "seek"
+        "audio";
+    }
+    #pip-controls[data-layout="stack"] .pip-row-transport { justify-content: center; flex-wrap: wrap; }
+    #pip-controls[data-layout="stack"] .pip-row-audio { justify-content: center; }
+
+    #pip-controls[data-layout="micro"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "transport"
+        "seek"
+        "audio";
+    }
+    #pip-controls[data-layout="micro"] .pip-row { justify-content: center; flex-wrap: wrap; }
+    #pip-controls[data-layout="micro"] #pip-seek { min-width: 0; }
   `;
   pipWin.document.head.appendChild(style);
 
@@ -277,7 +336,19 @@ function setupAutoPipWindow(pipWin, video) {
   const timeEl = pipWin.document.createElement("span");
   timeEl.id = "pip-time"; timeEl.textContent = "0:00";
 
-  controls.append(prevBtn, back10Btn, playBtn, fwd10Btn, nextBtn, seek, timeEl, muteBtn, volSlider, saveBtn);
+  const rowTransport = pipWin.document.createElement("div");
+  rowTransport.className = "pip-row pip-row-transport";
+  const rowSeek = pipWin.document.createElement("div");
+  rowSeek.className = "pip-row pip-row-seek";
+  const rowAudio = pipWin.document.createElement("div");
+  rowAudio.className = "pip-row pip-row-audio";
+
+  rowTransport.append(prevBtn, back10Btn, playBtn, fwd10Btn, nextBtn);
+  rowSeek.append(seek, timeEl);
+  rowAudio.append(muteBtn, volSlider, saveBtn);
+
+  controls.dataset.layout = "single";
+  controls.append(rowTransport, rowSeek, rowAudio);
   wrap.appendChild(controls);
   pipWin.document.body.appendChild(wrap);
 
@@ -379,11 +450,25 @@ function setupAutoPipWindow(pipWin, video) {
     const w = entry.contentRect.width;
     const h = entry.contentRect.height;
     let tier;
-    if (w < 130)      tier = "tiny";
-    else if (w < 210) tier = "small";
-    else if (w < 320) tier = "medium";
-    else              tier = "large";
+    let layout;
+    if (w < 150 || h < 105) {
+      tier = "nano";
+      layout = "micro";
+    } else if (w < 210 || h < 130) {
+      tier = "tiny";
+      layout = "stack";
+    } else if (w < 290 || h < 160) {
+      tier = "small";
+      layout = "stack";
+    } else if (w < 390 || h < 210) {
+      tier = "medium";
+      layout = "split";
+    } else {
+      tier = "large";
+      layout = "single";
+    }
     controls.dataset.size = tier;
+    controls.dataset.layout = layout;
   });
   ro.observe(pipWin.document.body);
 
