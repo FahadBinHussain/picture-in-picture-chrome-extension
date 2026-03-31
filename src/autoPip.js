@@ -143,6 +143,25 @@ function setupAutoPipWindow(pipWin, video) {
       display: none;
       z-index: 1;
     }
+    #pip-titlebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 12;
+      padding: 8px 10px;
+      background: linear-gradient(to bottom, rgba(0,0,0,.88) 0%, rgba(0,0,0,.25) 70%, transparent 100%);
+      color: #fff;
+      font: 600 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      transition: opacity .2s;
+      pointer-events: none;
+    }
+    #pip-wrap:hover #pip-titlebar,
+    #pip-titlebar:focus-within { opacity: 1; }
     /* Controls bar */
     #pip-controls {
       --pad-x: 8px;
@@ -315,6 +334,10 @@ function setupAutoPipWindow(pipWin, video) {
   artEl.id = "pip-art";
   artEl.alt = "Album artwork";
   wrap.appendChild(artEl);
+  const titleBar = pipWin.document.createElement("div");
+  titleBar.id = "pip-titlebar";
+  titleBar.textContent = "";
+  wrap.appendChild(titleBar);
 
   // ── Controls ─────────────────────────────────────────────────────────────
   const controls = pipWin.document.createElement("div");
@@ -409,11 +432,37 @@ function setupAutoPipWindow(pipWin, video) {
     }
     return "";
   };
+  const pickTrackTitle = () => {
+    try {
+      const md = navigator.mediaSession && navigator.mediaSession.metadata;
+      if (md && md.title) return String(md.title);
+    } catch (_) {}
+    const titleCandidates = [
+      "ytmusic-player-bar .title",
+      "ytmusic-player-bar .ytmusic-player-bar.title",
+      "ytmusic-player-bar [slot='title']",
+      "yt-formatted-string.title",
+      "title"
+    ];
+    for (const sel of titleCandidates) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      const txt = (el.textContent || "").trim();
+      if (txt) return txt;
+    }
+    return "";
+  };
   const updateArtwork = () => {
     const artSrc = pickArtworkFromMetadata() || pickArtworkFromDom();
     if (artSrc && artEl.src !== artSrc) artEl.src = artSrc;
     const noVisual = !hasVisualTrack || !video.videoWidth || video.videoWidth < 2 || video.readyState < 2;
     artEl.style.display = (noVisual && !!artSrc) ? "block" : "none";
+  };
+  const updateTitle = () => {
+    const title = pickTrackTitle();
+    titleBar.textContent = title || "";
+    titleBar.title = title || "";
+    titleBar.style.display = title ? "block" : "none";
   };
 
   video.addEventListener("play",       updatePlay);
@@ -422,10 +471,11 @@ function setupAutoPipWindow(pipWin, video) {
   video.addEventListener("timeupdate",  updateSeek);
   video.addEventListener("loadedmetadata", updateArtwork);
   video.addEventListener("emptied", updateArtwork);
-  updatePlay(); updateMute(); updateSeek(); updateArtwork();
+  updatePlay(); updateMute(); updateSeek(); updateArtwork(); updateTitle();
   const artworkPoller = pipWin.setInterval(() => {
     if (pipWin.closed) { pipWin.clearInterval(artworkPoller); return; }
     updateArtwork();
+    updateTitle();
   }, 1500);
 
   playBtn.addEventListener("click", () => { video.paused ? video.play() : video.pause(); });
