@@ -133,6 +133,16 @@ function setupAutoPipWindow(pipWin, video) {
       background: #000;
       max-width: none !important; max-height: none !important;
     }
+    #pip-art {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: none;
+      z-index: 1;
+    }
     /* Controls bar */
     #pip-controls {
       --pad-x: 8px;
@@ -276,11 +286,13 @@ function setupAutoPipWindow(pipWin, video) {
   wrap.id = "pip-wrap";
 
   let stream = null;
+  let hasVisualTrack = false;
   let displayVideo;
   try {
     stream = video.captureStream ? video.captureStream()
            : video.mozCaptureStream ? video.mozCaptureStream() : null;
     if (stream && stream.getTracks().length === 0) stream = null;
+    hasVisualTrack = !!(stream && stream.getVideoTracks && stream.getVideoTracks().length > 0);
   } catch (_) { stream = null; }
 
   if (stream) {
@@ -291,11 +303,18 @@ function setupAutoPipWindow(pipWin, video) {
     displayVideo.playsInline = true;
     displayVideo.play().catch(() => {});
   } else {
-    displayVideo = video;
-    video.setAttribute("__autopip__", "1");
+    displayVideo = pipWin.document.createElement("video");
+    displayVideo.autoplay = true;
+    displayVideo.muted = true;
+    displayVideo.playsInline = true;
+    displayVideo.setAttribute("aria-hidden", "true");
   }
   displayVideo.id = "pip-video";
   wrap.appendChild(displayVideo);
+  const artEl = pipWin.document.createElement("img");
+  artEl.id = "pip-art";
+  artEl.alt = "Album artwork";
+  wrap.appendChild(artEl);
 
   // ── Controls ─────────────────────────────────────────────────────────────
   const controls = pipWin.document.createElement("div");
@@ -369,12 +388,45 @@ function setupAutoPipWindow(pipWin, video) {
     if (video.duration) { seek.value = video.currentTime / video.duration; }
     timeEl.textContent = fmt(video.currentTime) + (video.duration ? ' / ' + fmt(video.duration) : '');
   };
+  const pickArtworkFromMetadata = () => {
+    try {
+      const md = navigator.mediaSession && navigator.mediaSession.metadata;
+      if (!md || !md.artwork || !md.artwork.length) return "";
+      const last = md.artwork[md.artwork.length - 1];
+      return (last && last.src) ? String(last.src) : "";
+    } catch (_) { return ""; }
+  };
+  const pickArtworkFromDom = () => {
+    const candidates = [
+      "ytmusic-player-bar img#img",
+      "ytmusic-player-bar .image img",
+      "ytmusic-player-page #song-image img",
+      "img.image"
+    ];
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el && el.src) return el.src;
+    }
+    return "";
+  };
+  const updateArtwork = () => {
+    const artSrc = pickArtworkFromMetadata() || pickArtworkFromDom();
+    if (artSrc && artEl.src !== artSrc) artEl.src = artSrc;
+    const noVisual = !hasVisualTrack || !video.videoWidth || video.videoWidth < 2 || video.readyState < 2;
+    artEl.style.display = (noVisual && !!artSrc) ? "block" : "none";
+  };
 
   video.addEventListener("play",       updatePlay);
   video.addEventListener("pause",      updatePlay);
   video.addEventListener("volumechange", updateMute);
   video.addEventListener("timeupdate",  updateSeek);
-  updatePlay(); updateMute(); updateSeek();
+  video.addEventListener("loadedmetadata", updateArtwork);
+  video.addEventListener("emptied", updateArtwork);
+  updatePlay(); updateMute(); updateSeek(); updateArtwork();
+  const artworkPoller = pipWin.setInterval(() => {
+    if (pipWin.closed) { pipWin.clearInterval(artworkPoller); return; }
+    updateArtwork();
+  }, 1500);
 
   playBtn.addEventListener("click", () => { video.paused ? video.play() : video.pause(); });
   muteBtn.addEventListener("click", () => { video.muted = !video.muted; });
@@ -532,10 +584,10 @@ function setupAutoPipWindow(pipWin, video) {
   // ── Pagehide: cleanup only (no size save — prevents drifted size from being stored) ──
   let _autoClosing = false;
   pipWin.addEventListener("pagehide", () => {
+    pipWin.clearInterval(artworkPoller);
     pipWin.clearInterval(movePoller);
     ro.disconnect();
     if (stream) stream.getTracks().forEach((t) => t.stop());
-    else { document.body.appendChild(video); video.removeAttribute("__autopip__"); }
     window._autoPipWindow = null;
   });
   pipWin._setAutoClosing = () => { _autoClosing = true; };
