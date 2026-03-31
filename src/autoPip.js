@@ -19,9 +19,17 @@ function findLargestPlayingVideo() {
     .filter((v) => v.readyState != 0)
     .filter((v) => v.disablePictureInPicture == false)
     .sort((a, b) => {
+      const aPlaying = !a.paused && !a.ended ? 1 : 0;
+      const bPlaying = !b.paused && !b.ended ? 1 : 0;
+      if (aPlaying !== bPlaying) return bPlaying - aPlaying;
+
+      const aHasVideo = a.videoWidth > 0 ? 1 : 0;
+      const bHasVideo = b.videoWidth > 0 ? 1 : 0;
+      if (aHasVideo !== bHasVideo) return bHasVideo - aHasVideo;
+      
       const ar = a.getClientRects()[0] || { width: 0, height: 0 };
       const br = b.getClientRects()[0] || { width: 0, height: 0 };
-      return br.width * br.height - ar.width * ar.height;
+      return (br.width * br.height) - (ar.width * ar.height);
     });
   return videos[0] || null;
 }
@@ -118,7 +126,50 @@ function triggerAutoPip() {
   });
 }
 
-function setupAutoPipWindow(pipWin, video) {
+function setupAutoPipWindow(pipWin, initialVideo) {
+  let video = initialVideo;
+  const queryDeepFirst = (root, selectors) => {
+    const list = Array.isArray(selectors) ? selectors : [selectors];
+    const queue = [root];
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || !node.querySelector) continue;
+      for (const sel of list) {
+        const hit = node.querySelector(sel);
+        if (hit) return hit;
+      }
+      const all = node.querySelectorAll("*");
+      for (const el of all) {
+        if (el.shadowRoot) queue.push(el.shadowRoot);
+      }
+    }
+    return null;
+  };
+  const queryDeepAll = (root, selectors) => {
+    const list = Array.isArray(selectors) ? selectors : [selectors];
+    const out = [];
+    const queue = [root];
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || !node.querySelectorAll) continue;
+      for (const sel of list) {
+        const hits = node.querySelectorAll(sel);
+        for (const h of hits) out.push(h);
+      }
+      const all = node.querySelectorAll("*");
+      for (const el of all) {
+        if (el.shadowRoot) queue.push(el.shadowRoot);
+      }
+    }
+    return out;
+  };
+  const isLikelyVisible = (el) => {
+    if (!el || !el.isConnected) return false;
+    if (el.getClientRects().length === 0) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== "none" && cs.visibility !== "hidden";
+  };
+
   const style = pipWin.document.createElement("style");
   style.textContent = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -304,32 +355,20 @@ function setupAutoPipWindow(pipWin, video) {
   const wrap = pipWin.document.createElement("div");
   wrap.id = "pip-wrap";
 
-  let stream = null;
-  let hasVisualTrack = false;
-  let displayVideo;
-  try {
-    stream = video.captureStream ? video.captureStream()
-           : video.mozCaptureStream ? video.mozCaptureStream() : null;
-    if (stream && stream.getTracks().length === 0) stream = null;
-    hasVisualTrack = !!(stream && stream.getVideoTracks && stream.getVideoTracks().length > 0);
-  } catch (_) { stream = null; }
-
-  if (stream) {
-    displayVideo = pipWin.document.createElement("video");
-    displayVideo.srcObject = stream;
-    displayVideo.autoplay = true;
-    displayVideo.muted = true;
-    displayVideo.playsInline = true;
-    displayVideo.play().catch(() => {});
-  } else {
-    displayVideo = pipWin.document.createElement("video");
-    displayVideo.autoplay = true;
-    displayVideo.muted = true;
-    displayVideo.playsInline = true;
-    displayVideo.setAttribute("aria-hidden", "true");
-  }
+  const displayVideo = pipWin.document.createElement("canvas");
   displayVideo.id = "pip-video";
   wrap.appendChild(displayVideo);
+  const ctx = displayVideo.getContext("2d");
+
+  const drawLoop = () => {
+    if (pipWin.closed) return;
+    pipWin.requestAnimationFrame(drawLoop);
+    if (!video || !video.videoWidth || !video.videoHeight || video.readyState < 2) return;
+    if (displayVideo.width !== video.videoWidth) displayVideo.width = video.videoWidth;
+    if (displayVideo.height !== video.videoHeight) displayVideo.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, displayVideo.width, displayVideo.height);
+  };
+  drawLoop();
   const artEl = pipWin.document.createElement("img");
   artEl.id = "pip-art";
   artEl.alt = "Album artwork";
@@ -419,7 +458,40 @@ function setupAutoPipWindow(pipWin, video) {
       return (last && last.src) ? String(last.src) : "";
     } catch (_) { return ""; }
   };
+  const pickArtworkFromYtMusicDom = () => {
+    // YT Music uses different layouts; choose the most likely active visible artwork.
+    const roots = queryDeepAll(document, [
+      "ytmusic-player",
+      "ytmusic-player-page",
+      "ytmusic-player-bar",
+      "#song-media-window"
+    ]).filter(isLikelyVisible);
+    const searchRoot = roots[0] || document;
+    const imgs = queryDeepAll(searchRoot, [
+      "#song-image #img",
+      "#song-image img",
+      "#thumbnail img",
+      "img#img",
+      "img.image",
+      "img[src*='ytimg.com']"
+    ]);
+    let best = "";
+    let bestArea = -1;
+    for (const el of imgs) {
+      if (!el) continue;
+      const src = el.currentSrc || el.src || "";
+      if (!src) continue;
+      if ("naturalWidth" in el && el.naturalWidth === 0) continue;
+      if (!isLikelyVisible(el)) continue;
+      const r = el.getBoundingClientRect();
+      const area = Math.max(0, r.width) * Math.max(0, r.height);
+      if (area > bestArea) { bestArea = area; best = src; }
+    }
+    return best;
+  };
   const pickArtworkFromDom = () => {
+    const ytmArt = pickArtworkFromYtMusicDom();
+    if (ytmArt) return ytmArt;
     const candidates = [
       "ytmusic-player-bar img#img",
       "ytmusic-player-bar .image img",
@@ -433,6 +505,17 @@ function setupAutoPipWindow(pipWin, video) {
     return "";
   };
   const pickTrackTitle = () => {
+    const isYtMusic = /(^|\.)music\.youtube\.com$/i.test(location.hostname);
+    if (isYtMusic) {
+      const liveTitle = queryDeepFirst(document, [
+        "ytmusic-player-bar .title",
+        "ytmusic-player-bar .title.style-scope.ytmusic-player-bar",
+        "ytmusic-player-page .title",
+        "#layout ytmusic-player-bar .title"
+      ]);
+      const txt = liveTitle ? (liveTitle.textContent || "").trim() : "";
+      if (txt) return txt;
+    }
     try {
       const md = navigator.mediaSession && navigator.mediaSession.metadata;
       if (md && md.title) return String(md.title);
@@ -452,12 +535,106 @@ function setupAutoPipWindow(pipWin, video) {
     }
     return "";
   };
-  const updateArtwork = () => {
-    const artSrc = pickArtworkFromMetadata() || pickArtworkFromDom();
-    if (artSrc && artEl.src !== artSrc) artEl.src = artSrc;
-    const noVisual = !hasVisualTrack || !video.videoWidth || video.videoWidth < 2 || video.readyState < 2;
-    artEl.style.display = (noVisual && !!artSrc) ? "block" : "none";
+  let lastDecodedFrames = -1;
+  let lastMediaTime = 0;
+  let frozenTicks = 0;
+  let lastSeenTitle = pickTrackTitle();
+  let trackChangedAt = 0;
+  let decodedAtTrackChange = -1;
+  let lastAppliedArtSrc = "";
+  let awaitingFreshArtAfterTrackChange = false;
+  const isVisualFrozen = () => {
+    const decoded = Number(video.webkitDecodedFrameCount || 0);
+    const mediaTime = Number(video.currentTime || 0);
+    const timeAdvanced = mediaTime > lastMediaTime + 0.2;
+    const frameAdvanced = decoded > lastDecodedFrames;
+    if (!video.paused && timeAdvanced && !frameAdvanced) frozenTicks += 1;
+    else frozenTicks = 0;
+    lastDecodedFrames = decoded;
+    lastMediaTime = mediaTime;
+    return frozenTicks >= 2;
   };
+  const syncVideo = (newV) => {
+    if (!newV || newV === video) return;
+    try {
+      video.removeEventListener("play", updatePlay);
+      video.removeEventListener("pause", updatePlay);
+      video.removeEventListener("volumechange", updateMute);
+      video.removeEventListener("timeupdate", updateSeek);
+      video.removeEventListener("loadedmetadata", updateArtwork);
+      video.removeEventListener("emptied", updateArtwork);
+    } catch (_) {}
+    video = newV;
+    video.addEventListener("play", updatePlay);
+    video.addEventListener("pause", updatePlay);
+    video.addEventListener("volumechange", updateMute);
+    video.addEventListener("timeupdate", updateSeek);
+    video.addEventListener("loadedmetadata", updateArtwork);
+    video.addEventListener("emptied", updateArtwork);
+    // Video element swapped; the canvas drawLoop automatically reads from the new `video` ref.
+  };
+
+  const handleTrackChangeTrigger = () => {
+    trackChangedAt = Date.now();
+    decodedAtTrackChange = Number(video.webkitDecodedFrameCount || 0);
+    frozenTicks = 0;
+    awaitingFreshArtAfterTrackChange = true;
+    artEl.src = "";
+    if (pipWin.console) pipWin.console.log("[AutoPiP] Track change triggered; art cleared.");
+    
+    // Check if the video element has swapped
+    const best = findLargestPlayingVideo();
+    if (best && best !== video) syncVideo(best);
+  };
+
+  const updateArtwork = () => {
+    const titleNow = pickTrackTitle();
+    const isYtMusic = /(^|\.)music\.youtube\.com$/i.test(location.hostname);
+    const rawArtSrc = isYtMusic ? pickArtworkFromYtMusicDom() : (pickArtworkFromMetadata() || pickArtworkFromDom());
+    let artSrc = rawArtSrc;
+
+    if (!video.isConnected) {
+      const best = findLargestPlayingVideo();
+      if (best) syncVideo(best);
+    }
+
+    if (titleNow && titleNow !== lastSeenTitle) {
+      lastSeenTitle = titleNow;
+      handleTrackChangeTrigger();
+    }
+
+    if (awaitingFreshArtAfterTrackChange) {
+      const inFreshWindow = (Date.now() - trackChangedAt) < 2500;
+      const hasFreshArt = !!artSrc && artSrc !== lastAppliedArtSrc;
+      if (hasFreshArt || !inFreshWindow) awaitingFreshArtAfterTrackChange = false;
+      if (inFreshWindow && !hasFreshArt) artSrc = "";
+    }
+
+    if (isYtMusic && !rawArtSrc && !awaitingFreshArtAfterTrackChange) {
+      // Never keep stale art on YT Music when active artwork is unavailable.
+      artEl.removeAttribute("src");
+      lastAppliedArtSrc = "";
+    }
+
+    if (artSrc && artEl.src !== artSrc) {
+      artEl.src = artSrc;
+      lastAppliedArtSrc = artSrc;
+    }
+
+    const decodedNow = Number(video.webkitDecodedFrameCount || 0);
+    const newFramesAfterChange = decodedAtTrackChange >= 0 && decodedNow > decodedAtTrackChange + 3;
+    const inTrackChangeWindow = trackChangedAt > 0 && (Date.now() - trackChangedAt) < 3000;
+    const preferArtworkForFreshTrack = inTrackChangeWindow && !newFramesAfterChange;
+    const noVisual = !video.videoWidth || video.videoWidth < 2 || video.readyState < 2 || isVisualFrozen() || preferArtworkForFreshTrack;
+    
+    displayVideo.style.opacity = preferArtworkForFreshTrack ? "0" : "1";
+
+    const showArt = noVisual && !!artSrc && !awaitingFreshArtAfterTrackChange;
+    artEl.style.display = showArt ? "block" : "none";
+  };
+
+  // Expose for button handlers
+  window.__pip_handleTrackChange = handleTrackChangeTrigger;
   const updateTitle = () => {
     const title = pickTrackTitle();
     titleBar.textContent = title || "";
@@ -476,7 +653,7 @@ function setupAutoPipWindow(pipWin, video) {
     if (pipWin.closed) { pipWin.clearInterval(artworkPoller); return; }
     updateArtwork();
     updateTitle();
-  }, 1500);
+  }, 800);
 
   playBtn.addEventListener("click", () => { video.paused ? video.play() : video.pause(); });
   muteBtn.addEventListener("click", () => { video.muted = !video.muted; });
@@ -520,6 +697,9 @@ function setupAutoPipWindow(pipWin, video) {
     return false;
   };
   const runTrackAction = (dir) => {
+    try {
+      if (window.__pip_handleTrackChange) window.__pip_handleTrackChange();
+    } catch (_) {}
     const selectors = dir === "prev"
       ? [
           "ytmusic-player-bar tp-yt-paper-icon-button.previous-button",
@@ -637,7 +817,6 @@ function setupAutoPipWindow(pipWin, video) {
     pipWin.clearInterval(artworkPoller);
     pipWin.clearInterval(movePoller);
     ro.disconnect();
-    if (stream) stream.getTracks().forEach((t) => t.stop());
     window._autoPipWindow = null;
   });
   pipWin._setAutoClosing = () => { _autoClosing = true; };
