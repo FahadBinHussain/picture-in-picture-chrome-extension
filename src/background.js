@@ -115,7 +115,7 @@ function updateContentScripts(autoPip) {
   }
   
   // Get enabled sites from storage
-  chrome.storage.local.get({ enabledSites: 'https://www.youtube.com/*\nhttps://www.netflix.com/*\nhttps://vimeo.com/*\nhttps://www.twitch.tv/*' }, (result) => {
+  chrome.storage.local.get({ enabledSites: 'https://www.youtube.com/*\nhttps://music.youtube.com/*\nhttps://www.netflix.com/*\nhttps://vimeo.com/*\nhttps://www.twitch.tv/*' }, (result) => {
     const sites = result.enabledSites
       .split('\n')
       .map(s => s.trim())

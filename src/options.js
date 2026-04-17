@@ -1,6 +1,7 @@
 // options.js - Settings page logic
 
 const DEFAULT_SITES = `https://www.youtube.com/*
+https://music.youtube.com/*
 https://www.netflix.com/*
 https://vimeo.com/*
 https://www.twitch.tv/*`;
