@@ -1,7 +1,7 @@
 {
   "name": "Picture-in-Picture Extension (by Google)",
   "description": "Watch video using Picture-in-Picture",
-  "version": "1.71",
+  "version": "1.73",
   "icons": {
     "128": "assets/icon128.png"
   },
@@ -16,28 +16,23 @@
     }
   },
   "commands": {
-    "_execute_action": {
-      "suggested_key": {
-        "windows": "Alt+P",
-        "mac": "Alt+P",
-        "chromeos": "Alt+P",
-        "linux": "Alt+P"
-      }
-    },
     "open-pip": {
       "suggested_key": {
-        "windows": "Ctrl+Shift+P",
-        "mac": "Command+Shift+P",
-        "chromeos": "Ctrl+Shift+P",
-        "linux": "Ctrl+Shift+P"
+        "default": "Ctrl+Shift+8",
+        "windows": "Ctrl+Shift+8",
+        "mac": "Command+Shift+8",
+        "chromeos": "Ctrl+Shift+8",
+        "linux": "Ctrl+Shift+8"
       },
-      "description": "Open Picture-in-Picture"
+      "description": "Toggle browser Picture-in-Picture",
+      "global": true
     }
   },
   "permissions": [
     "contextMenus",
     "scripting",
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "<all_urls>"

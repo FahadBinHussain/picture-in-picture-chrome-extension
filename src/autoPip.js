@@ -13,6 +13,10 @@
 // limitations under the License.
 
 // autoPip.js — v1.71
+if (window.__autoPipContentLoaded) {
+  console.log("[AutoPiP] content script already loaded");
+} else {
+window.__autoPipContentLoaded = true;
 
 function findLargestPlayingVideo() {
   const videos = Array.from(document.querySelectorAll("video"))
@@ -51,6 +55,13 @@ try {
 
 // Listen for messages from background.js (keyboard shortcut + icon click)
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'toggleBrowserPip') {
+    toggleBrowserPip()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err && err.message ? err.message : String(err) }));
+    return true;
+  }
+
   if (msg.type === 'openPip') {
     console.log('[AutoPiP] Opening PiP via message');
     manualTriggerPip();
@@ -58,6 +69,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 });
+
+function toggleBrowserPip() {
+  if (!document.pictureInPictureEnabled) {
+    return Promise.resolve({ ok: false, error: "Browser Picture-in-Picture is not available on this page." });
+  }
+
+  if (document.pictureInPictureElement) {
+    return document.exitPictureInPicture().then(() => ({ ok: true, action: "closed" }));
+  }
+
+  const video = findLargestPlayingVideo();
+  if (!video) {
+    return Promise.resolve({ ok: false, error: "No Picture-in-Picture capable video found." });
+  }
+
+  return video.requestPictureInPicture().then(() => ({ ok: true, action: "opened" }));
+}
 
 // Manual trigger (doesn't check document.hidden)
 function manualTriggerPip() {
@@ -815,7 +843,7 @@ function setupAutoPipWindow(pipWin, initialVideo) {
   let _autoClosing = false;
   pipWin.addEventListener("pagehide", () => {
     pipWin.clearInterval(artworkPoller);
-    pipWin.clearInterval(movePoller);
+    if (typeof movePoller !== "undefined") pipWin.clearInterval(movePoller);
     ro.disconnect();
     window._autoPipWindow = null;
   });
@@ -834,4 +862,6 @@ function stopAutoPip() {
     document.body.appendChild(movedVideo);
     movedVideo.removeAttribute('__autopip__');
   }
+}
+
 }
