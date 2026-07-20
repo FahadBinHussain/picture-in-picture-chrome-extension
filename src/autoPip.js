@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// autoPip.js — v1.71
+// autoPip.js — v1.74
 if (window.__autoPipContentLoaded) {
   console.log("[AutoPiP] content script already loaded");
 } else {
@@ -117,9 +117,37 @@ function manualTriggerPip() {
         setupAutoPipWindow(pipWin, video);
       })
       .catch((err) => {
-        console.log('[AutoPiP v1.71] Document PiP failed:', err.message);
+        console.log('[AutoPiP v1.74] Document PiP failed:', err.message);
       });
   });
+}
+
+function openDocumentPipFor(video, stored, onFallback) {
+  const w = (stored && stored.w > 0) ? stored.w : Math.max(320, video.videoWidth  || 640);
+  const h = (stored && stored.h > 0) ? stored.h : Math.max(180, video.videoHeight || 360);
+  return window.documentPictureInPicture.requestWindow({ width: w, height: h })
+    .then((pipWin) => {
+      window._autoPipWindow = pipWin;
+      setupAutoPipWindow(pipWin, video);
+      return { ok: true, mode: "document" };
+    })
+    .catch((err) => {
+      console.log('[AutoPiP v1.74] Document PiP failed:', err.message);
+      if (onFallback) return onFallback(err);
+      return { ok: false, error: err.message };
+    });
+}
+
+// Fallback to the native <video>.requestPictureInPicture() API. This is *not*
+// user-gesture-gated for already-playing media, so it works on a tab switch
+// (where Document PiP's requestWindow() is rejected by Chrome for lack of
+// transient activation — most visible on youtube.com).
+function openNativePipFor(video) {
+  if (!document.pictureInPictureEnabled) return Promise.resolve({ ok: false, error: "PiP not enabled" });
+  if (document.pictureInPictureElement) return Promise.resolve({ ok: true, mode: "native", reused: true });
+  return video.requestPictureInPicture()
+    .then(() => ({ ok: true, mode: "native" }))
+    .catch((err) => ({ ok: false, error: err && err.message ? err.message : String(err) }));
 }
 
 function triggerAutoPip() {
@@ -129,28 +157,39 @@ function triggerAutoPip() {
   // If a pip window exists but is still closing (pagehide not yet fired after .close()),
   // wait for it to fully unload before opening a new one — Chrome rejects concurrent opens.
   if (window._autoPipWindow && !window._autoPipWindow.closed) {
-    window._autoPipWindow.addEventListener('pagehide', () => {
+    const wp = window._autoPipWindow;
+    let retried = false;
+    const retry = () => {
+      if (retried) return;
+      retried = true;
       setTimeout(() => { if (document.hidden) triggerAutoPip(); }, 100);
-    }, { once: true });
+    };
+    wp.addEventListener('pagehide', retry, { once: true });
+    // Safety: if pagehide never fires (window closed via OS controls), retry anyway.
+    setTimeout(retry, 800);
     return;
   }
 
-  if (typeof window.documentPictureInPicture === 'undefined') return;
+  // Already in native PiP from a previous trigger — nothing to do.
+  if (document.pictureInPictureElement) return;
 
   chrome.runtime.sendMessage({ type: 'getPipSize' }, (stored) => {
     if (!document.hidden) return;
     if (window._autoPipWindow && !window._autoPipWindow.closed) return;
+    if (document.pictureInPictureElement) return;
 
-    const w = (stored && stored.w > 0) ? stored.w : Math.max(320, video.videoWidth  || 640);
-    const h = (stored && stored.h > 0) ? stored.h : Math.max(180, video.videoHeight || 360);
-    window.documentPictureInPicture.requestWindow({ width: w, height: h })
-      .then((pipWin) => {
-        window._autoPipWindow = pipWin;
-        setupAutoPipWindow(pipWin, video);
-      })
-      .catch((err) => {
-        console.log('[AutoPiP v1.71] Document PiP failed:', err.message);
+    const useDocumentPip = typeof window.documentPictureInPicture !== 'undefined';
+    if (useDocumentPip) {
+      openDocumentPipFor(video, stored, (docErr) => {
+        // Document PiP failed (typically "user gesture required" on a tab-switch
+        // for sites like youtube.com). Fall back to the native PiP API so auto-PiP
+        // still works there.
+        console.log('[AutoPiP v1.74] falling back to native PiP after Document PiP error:', docErr.message);
+        return openNativePipFor(video);
       });
+    } else {
+      openNativePipFor(video);
+    }
   });
 }
 
@@ -857,10 +896,11 @@ function stopAutoPip() {
   } else {
     window._autoPipWindow = null;
   }
-  const movedVideo = document.querySelector('video[__autopip__]');
-  if (movedVideo) {
-    document.body.appendChild(movedVideo);
-    movedVideo.removeAttribute('__autopip__');
+  // If we fell back to native <video> PiP on auto-trigger (e.g. on youtube.com
+  // where Document PiP is rejected for lack of a user gesture), exit it so
+  // returning to the tab clears PiP as expected.
+  if (document.pictureInPictureElement) {
+    document.exitPictureInPicture().catch(() => {});
   }
 }
 

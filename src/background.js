@@ -245,7 +245,7 @@ function updateContentScripts(autoPip) {
   chrome.storage.local.get(
     {
       enabledSites:
-        "https://www.youtube.com/*\nhttps://music.youtube.com/*\nhttps://www.netflix.com/*\nhttps://vimeo.com/*\nhttps://www.twitch.tv/*",
+        "https://www.youtube.com/*\nhttps://youtube.com/*\nhttps://music.youtube.com/*\nhttps://www.netflix.com/*\nhttps://vimeo.com/*\nhttps://www.twitch.tv/*",
     },
     (result) => {
       const sites = result.enabledSites
