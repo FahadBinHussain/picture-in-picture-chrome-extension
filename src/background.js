@@ -144,7 +144,9 @@ chrome.storage.local.get({ pipSizeW: 0, pipSizeH: 0, pipSizeX: null, pipSizeY: n
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === "getPipSize") {
-    reply({ w: _pipW, h: _pipH, x: _pipX, y: _pipY });
+    chrome.storage.local.get({ pipSizeW: 0, pipSizeH: 0, pipSizeX: null, pipSizeY: null }, (s) => {
+      reply({ w: s.pipSizeW, h: s.pipSizeH, x: s.pipSizeX, y: s.pipSizeY });
+    });
     return true;
   }
   if (msg.type === "setPipSize" && msg.w > 0 && msg.h > 0) {

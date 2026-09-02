@@ -31,6 +31,19 @@ The old default list only had `https://www.youtube.com/*`. YouTube sometimes
 redirects through / serves from bare `https://youtube.com/*` — that URL would
 silently get no content script. Both patterns are in the default list now.
 
+## Service worker cold-start dimension race
+
+- **Background.js `getPipSize` race:** MV3 service workers are killed after
+  ~30s idle. When a content script sends `getPipSize` on tab switch, the SW
+  wakes up and runs top-level code, but the async `chrome.storage.local.get()`
+  (line 138) callback hasn't fired yet. The synchronous `getPipSize` handler
+  replies with zeroed in-memory globals → content script opens PiP at the
+  reset default size. On the second tab switch, the SW is already warm and
+  globals are populated → correct size.
+- **Fix:** `getPipSize` reads directly from `chrome.storage.local` instead of
+  the in-memory cache, so it always returns the correct saved dimensions even
+  on a cold SW start.
+
 ## Quick checks
 
 - `node --check src/autoPip.js` and `node --check src/background.js` and
