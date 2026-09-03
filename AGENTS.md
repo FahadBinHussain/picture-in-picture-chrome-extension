@@ -50,4 +50,10 @@ silently get no content script. Both patterns are in the default list now.
   `node --check src/options.js` validate syntax (no test framework).
 - Manifest is JSON — verify with `node -e "JSON.parse(require('fs').readFileSync('src/manifest.json','utf8'))"`.
 - No build step. Load `src/` as an unpacked extension in `edge://extensions`
-  or `chrome://extensions` to test. Reload after edits.
+  or `chrome://extensions` to test. Reload after edits (bump `version` patch
+  in `src/manifest.json` in the same edit) with `pwsh tools/reload-extension.ps1`
+  — it opens `src/reload.html`, which messages bg to blank its tab + call
+  `chrome.runtime.reload()`, so manifest bumps are picked up too. Extensions
+  Reloader is JS-only and never re-reads the manifest. note: no pinned manifest
+  `key`, so the extension id in the ps1 is path-derived — if the folder moves,
+  re-read the id from `edge://extensions`.
