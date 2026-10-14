@@ -1,19 +1,18 @@
 // reload.js - dev-loop helper behind reload.html (opened by
 // tools/reload-extension.ps1 after editing extension files, INCLUDING
-// manifest.json). Extensions Reloader can NOT pick up manifest changes - it
-// only flips chrome.management.setEnabled off/on, which never re-reads the
-// manifest from disk. chrome.runtime.reload() called from INSIDE the
-// extension re-loads from disk, like the edge://extensions reload button.
+// manifest.json). one method, no background handler: this extension page
+// itself calls chrome.runtime.reload() - core MV3 API, available in every
+// build, so it reloads from disk no matter how old the RUNNING copy is.
+// (the old sendMessage handshake required the running copy to already
+// contain the selfReload handler; on an older copy it just showed a
+// manual-reload notice instead of reloading.) the status text below stays
+// painted after the reload kills this page's context.
+const el = document.getElementById("status");
+let ver = "";
+try { ver = chrome.runtime.getManifest().version; } catch (_) {}
 try {
-  chrome.runtime.sendMessage({ type: "selfReload" });
-  // the bg blanks this tab to about:blank within ~1s when the running copy
-  // has the handler. still here after 3s = it doesn't (pre-helper version):
-  // one manual reload on edge://extensions fixes that, then this is automatic.
-  setTimeout(() => {
-    const el = document.getElementById("status");
-    if (el) el.textContent = "running version has no self-reload yet - hit reload on edge://extensions once, then this page works.";
-  }, 3000);
+  if (el) el.textContent = "reloading from disk (running " + ver + ") - done, close this tab.";
+  chrome.runtime.reload();
 } catch (e) {
-  const el = document.getElementById("status");
   if (el) el.textContent = "reload failed: " + String(e && e.message ? e.message : e);
 }

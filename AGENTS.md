@@ -71,8 +71,12 @@ silently get no content script. Both patterns are in the default list now.
 - No build step. Load `src/` as an unpacked extension in `edge://extensions`
   or `chrome://extensions` to test. Reload after edits (bump `version` patch
   in `src/manifest.json` in the same edit) with `pwsh tools/reload-extension.ps1`
-  — it opens `src/reload.html`, which messages bg to blank its tab + call
-  `chrome.runtime.reload()`, so manifest bumps are picked up too. Extensions
+  — it opens `src/reload.html`, whose script calls `chrome.runtime.reload()`
+  directly from the extension page (core MV3 API, no background handler), so
+  manifest bumps are picked up even when the running copy predates the reload
+  page. never needs a manual edge://extensions click. the earlier
+  sendMessage-handshake version had a bootstrap hole: a pre-handler running
+  copy showed a "hit reload once" notice instead of reloading. Extensions
   Reloader is JS-only and never re-reads the manifest. note: no pinned manifest
   `key`, so the extension id in the ps1 is path-derived — if the folder moves,
   re-read the id from `edge://extensions`.
