@@ -44,6 +44,25 @@ silently get no content script. Both patterns are in the default list now.
   the in-memory cache, so it always returns the correct saved dimensions even
   on a cold SW start.
 
+## YT Music DOM churn (2026-10)
+
+- YT Music's 2026 UI removed `ytmusic-player-bar` entirely. The song title now
+  lives in `ytmusic-track-info .ytmusicTrackInfoTitle` (text content + `title`
+  attribute); artist byline in `.ytmusicTrackInfoByline`.
+- The queue panel header reuses the old `.title` class:
+  `yt-formatted-string.title` inside `ytmusic-queue-header-renderer` is the
+  "Playing from" label, and the left-nav guide entries (Home/Explore/Library/…)
+  also match a bare `yt-formatted-string.title` in document order. Any selector
+  of the form `*.title` on YT Music is therefore a junk magnet.
+- `pickTrackTitle` now prefers `navigator.mediaSession.metadata.title` (verified
+  correct on YT Music), then `ytmusic-track-info .ytmusicTrackInfoTitle`, then
+  the legacy selectors; every candidate passes `cleanTitle()` which drops
+  nav/queue labels ("Playing from", "Home", …).
+- To re-verify after another YT Music redesign: `browser-use` JS dump of
+  `ytmusic-track-info` outerHTML + check what bare `yt-formatted-string.title`
+  resolves to in document order. mediaSession is the stable source; DOM is
+  fallback only.
+
 ## Quick checks
 
 - `node --check src/autoPip.js` and `node --check src/background.js` and
