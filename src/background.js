@@ -170,6 +170,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     reply({ ok: true });
     return true;
   }
+  if (msg.type === "selfReload") {
+    // Dev-loop: reload.html asks us to re-read the extension from disk. Reply
+    // BEFORE reload() - the teardown destroys the message port instantly.
+    const tabId = _sender && _sender.tab && _sender.tab.id;
+    if (typeof tabId === "number") {
+      chrome.tabs.update(tabId, { url: "about:blank" }, () => void chrome.runtime.lastError);
+    }
+    reply({ ok: true });
+    chrome.runtime.reload();
+    return true;
+  }
 });
 
 chrome.action.onClicked.addListener((tab) => {

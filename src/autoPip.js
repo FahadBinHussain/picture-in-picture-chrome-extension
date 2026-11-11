@@ -822,26 +822,31 @@ function setupAutoPipWindow(pipWin, initialVideo) {
     try {
       if (window.__pip_handleTrackChange) window.__pip_handleTrackChange();
     } catch (_) {}
+    // YT Music's 2026 UI moved the transport controls out of the removed
+    // ytmusic-player-bar and into ytmusic-wiz-player-controls (locale-independent
+    // wrapper classes). The bare button[aria-label*='Next|Previous'] selectors
+    // that used to be here also matched carousel arrows (next-items-button), so
+    // generic aria/title lookups are scoped to the player controls only.
     const selectors = dir === "prev"
       ? [
+          "ytmusic-wiz-player-controls .ytmusicPlayerControlsPreviousButton button",
+          "ytmusic-wiz-player-controls button[aria-label*='Previous']",
+          "ytmusic-wiz-player-controls button[title*='Previous']",
           "ytmusic-player-bar tp-yt-paper-icon-button.previous-button",
           "ytmusic-player-bar .previous-button",
           "button.previous-button",
           ".ytp-prev-button",
-          "button[aria-label*='Previous']",
-          "button[title*='Previous']",
-          "button[aria-label*='Prev']",
-          "[data-testid*='previous']",
-          "[data-testid*='prev']"
+          "ytmusic-player button[aria-label*='Previous']"
         ]
       : [
+          "ytmusic-wiz-player-controls .ytmusicPlayerControlsNextButton button",
+          "ytmusic-wiz-player-controls button[aria-label*='Next']",
+          "ytmusic-wiz-player-controls button[title*='Next']",
           "ytmusic-player-bar tp-yt-paper-icon-button.next-button",
           "ytmusic-player-bar .next-button",
           "button.next-button",
           ".ytp-next-button",
-          "button[aria-label*='Next']",
-          "button[title*='Next']",
-          "[data-testid*='next']"
+          "ytmusic-player button[aria-label*='Next']"
         ];
     if (clickFirst(document, selectors)) return;
     for (const frame of document.querySelectorAll("iframe")) {
